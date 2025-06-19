@@ -1,0 +1,9 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Grafana
+metadata:
+  name: fandango-grafana
+spec:
+  ingress:
+    enabled: true
+  dashboard:
+    label: fandango

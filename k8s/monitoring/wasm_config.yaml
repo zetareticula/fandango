@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fandango-wasm-config
+data:
+  wasm_runtime: "wasmtime"
+  max_memory_mb: "512"
