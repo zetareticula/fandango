@@ -1,5 +1,7 @@
 use bloomfilter::Bloom;
 
+
+/// Deduplicates a vector of f32 values using a Bloom filter to track unique blocks.
 pub fn deduplicate_kvcache(data: &[f32]) -> Vec<f32> {
     const BLOCK_SIZE: usize = 64;
     const BLOOM_SIZE: usize = 10000;
@@ -17,3 +19,6 @@ pub fn deduplicate_kvcache(data: &[f32]) -> Vec<f32> {
     }
     unique_blocks
 }
+
+
+

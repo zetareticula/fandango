@@ -5,3 +5,17 @@ metadata:
 data:
   wasm_runtime: "wasmtime"
   max_memory_mb: "512"
+  max_wasm_size_mb: "100"
+  enable_wasm_metrics: "true"
+  enable_wasm_logging: "true"
+  enable_wasm_tracing: "true"
+  enable_wasm_profiler: "true"
+  wasm_profiler_interval_ms: "1000"
+  enable_wasm_security: "true"
+  wasm_security_policy: "strict"
+  enable_wasm_debugging: "true"
+  wasm_debugging_port: "8080"
+  enable_wasm_hot_reloading: "true"
+  wasm_hot_reload_interval_ms: "5000"
+
+  

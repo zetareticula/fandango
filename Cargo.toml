@@ -1,0 +1,25 @@
+[dependencies]
+candle-core = { version = "0.4", features = ["cuda"] }
+half = "2.2"
+triton-client = "0.5"
+triton-server = { version = "0.5", features = ["grpc"] }
+triton-server-proto = "0.5"
+triton-server-proto-grpc = { version = "0.5", features = ["grpc"] }
+
+
+
+[dev-dependencies]
+candle-core = { version = "0.4", features = ["cuda"] }
+candle-test = { version = "0.4", features = ["cuda"] }
+candle = { version = "0.4", features = ["cuda"] }
+
+
+
+[package]
+name = "fandango"
+version = "0.1.0"
+edition = "2021"
+description = "A library for running Fandango models with CUDA support"
+
+[features]
+cuda = ["candle-core/cuda"] 

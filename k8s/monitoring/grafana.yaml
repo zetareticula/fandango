@@ -7,3 +7,77 @@ spec:
     enabled: true
   dashboard:
     label: fandango
+  serviceAccountName: fandango-grafana-sa
+  service:
+    type: LoadBalancer
+  resources:
+    requests:
+      memory: "200Mi"
+      cpu: "100m"
+  config:
+    log:
+      mode: console
+      level: info
+    auth:
+      disable_login_form: false
+      disable_signout_menu: false
+    users:
+      - name: admin
+        password: admin1234
+        isAdmin: true
+    dashboards:
+      default:
+        fandango-dashboard.json: |
+          {
+            "title": "Fandango Dashboard",
+            "panels": [],
+            "templating": {
+              "list": []
+            }
+          }
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://fandango-prometheus.default.svc.cluster.local:9090
+        isDefault: true
+    security:
+      admin:
+        password: admin1234
+      allow_embedding: true
+  serviceMonitorSelector:
+    matchLabels:
+      app: fandango-test
+  nodeSelector:
+    accelerator: nvidia
+  tolerations:
+  - key: "nvidia.com/gpu"
+    operator: "Exists"
+    effect: "NoSchedule"
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: accelerator
+            operator: In
+            values:
+            - nvidia
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+    prometheus.io/path: "/metrics"
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
+  image:
+    repository: grafana/grafana
+    tag: "9.0.0"
+    pullPolicy: IfNotPresent
+  imagePullSecrets:
+  - name: grafana-registry-secret

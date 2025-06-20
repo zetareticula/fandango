@@ -1,3 +1,9 @@
+// This file is part of the Zeta Reticula - Fandango project, which is released under the Apache License 2.0.
+// SPDX-License-Identifier: Apache-2.0
+
+
+
+//calculate entropy and measure locality of attention data
 pub fn calculate_entropy(data: &[f32]) -> f32 {
     if data.is_empty() {
         return 0.0;
@@ -46,3 +52,9 @@ pub fn measure_locality(data: &[f32]) -> f32 {
     // Normalize locality to a range of 0.0 to 1.0
     locality / mean.abs().max(1.0)
 }
+
+
+
+
+
+

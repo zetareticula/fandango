@@ -1,4 +1,7 @@
 use wasm_bindgen::prelude::*;
+use tch::{Device, Tensor};
+use candle_core::{Result, DType};
+
 
 #[wasm_bindgen]
 pub fn init_wasm_attention() -> *mut FusedAttention {
@@ -14,3 +17,14 @@ pub fn apply_wasm_attention(ptr: *mut FusedAttention, query: Vec<f32>) -> Vec<f3
     let output = attention.apply(&tensor, &tensor, &tensor).unwrap().to_vec1::<f32>().unwrap();
     output
 }
+
+#[wasm_bindgen]
+pub fn free_wasm_attention(ptr: *mut FusedAttention) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        Box::from_raw(ptr); // This will drop the FusedAttention instance
+    }
+}
+

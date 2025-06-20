@@ -10,3 +10,25 @@ spec:
     requests:
       memory: "400Mi"
       cpu: "200m"
+  serviceMonitor:
+    namespace: default
+    selector:
+      matchLabels:
+        app: fandango-test
+  serviceAccountName: fandango-prometheus-sa
+  service:
+    type: LoadBalancer
+  config: 
+    log:
+      level: info
+      format: json
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    externalLabels:
+      monitor: "fandango"
+  podMonitorSelector:
+    matchLabels:
+      app: fandango-test
+  nodeSelector:
+
+  
