@@ -1,6 +1,18 @@
 // This file is part of the Zeta Reticula - Fandango project, which is released under the Apache License 2.0.
 // SPDX-License-Identifier: Apache-2.0
 
+// This file contains functions to calculate entropy and measure locality of attention data.
+use std::f32;
+use std::iter::Sum;
+use std::ops::{Add, Div, Mul};
+
+// Calculate the mean of a given data slice.
+pub fn calculate_mean(data: &[f32]) -> f32 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    data.iter().sum::<f32>() / data.len() as f32
+}
 
 
 //calculate entropy and measure locality of attention data
@@ -55,6 +67,14 @@ pub fn measure_locality(data: &[f32]) -> f32 {
 
 
 
+// Calculate variance of the data
+pub fn calculate_variance(data: &[f32]) -> f32 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mean = calculate_mean(data);
+    data.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / data.len() as f32
+}
 
 
 

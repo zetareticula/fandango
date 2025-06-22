@@ -2,6 +2,40 @@
 
 use crate::quantized_model_loader; // Module for loading GGUF/safetensors
 use std::path::Path;
+use std::fs;
+
+
+
+
+
+#![allow(unused)]
+pub mod model_loader;
+
+
+// Abstracting the model loading and caching functionality
+// This module provides a `ModelLoader` struct that integrates with the `quantized_model_loader`
+// crate to handle loading and caching of quantized layers from GGUF/safetensors files.
+
+
+
+
+// ModelLoader for loading and caching quantized layers from GGUF/safetensors
+// This module integrates with the `quantized_model_loader` crate to handle quantized model loading
+// and caching of quantized layers to optimize performance in a neural network runtime environment.
+// It provides functionality to load models, apply dynamic quantization, and manage cached layers.
+
+
+
+pub struct QuantizedModelLoader {
+    loader: quantized_model_loader::QuantizedLoader, // Integration with quantized_model_loader
+    cache_dir: String, // Directory for cached quantized layers
+    let cache_dir = String::from("cached_layers/"), // Default cache directory
+     if cache_dir.is_empty() {
+        cache_dir = String::from("cached_layers/"); // Default cache directory
+
+
+} 
+
 
 pub struct ModelLoader {
     loader: quantized_model_loader::QuantizedLoader, // Integration with quantized_model_loader
@@ -60,6 +94,8 @@ impl ModelLoader {
     }
 }
 
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,3 +113,4 @@ mod tests {
         loader.unload("test_model"); // Test cleanup
     }
 }
+
