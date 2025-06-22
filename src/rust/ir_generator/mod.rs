@@ -32,3 +32,4 @@ impl IRGenerator {
         println!("Profiling Results: {:?}", profiler.get_profile());
     }
 }
+

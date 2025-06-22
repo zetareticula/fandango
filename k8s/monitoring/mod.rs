@@ -21,6 +21,14 @@ pub static LATENCY: Lazy<Histogram> = Lazy::new(|| {
     ).unwrap()
 });
 
+pub static SPECULATIVE_ACCEPTED: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!("fandango_speculative_accepted_total", "Total number of accepted speculative tokens").unwrap()
+});
+
+pub static SPECULATIVE_REJECTED: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!("fandango_speculative_rejected_total", "Total number of rejected speculative tokens").unwrap()
+});
+
 pub fn record_cache_hit() {
     CACHE_HITS.inc();
 }
@@ -35,4 +43,12 @@ pub fn record_eviction() {
 
 pub fn record_latency(latency: f64) {
     LATENCY.observe(latency);
+}
+
+pub fn record_speculative_accepted() {
+    SPECULATIVE_ACCEPTED.inc();
+}
+
+pub fn record_speculative_rejected() {
+    SPECULATIVE_REJECTED.inc();
 }

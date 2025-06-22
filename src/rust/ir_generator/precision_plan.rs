@@ -1,5 +1,30 @@
 use crate::ir_generator::profiling::Profiler;
 use crate::kvcache_manager::entropy_heuristic;
+use crate::kvcache_manager::precision_plan::PrecisionPlanResult;
+use crate::kvcache_manager::profile::Profile;
+
+#[derive(Debug, Clone)]
+pub struct PrecisionPlan {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrecisionPlanResult {
+    pub precision: String,
+    pub sparsity: f32,
+}
+
+impl PrecisionPlan {
+    pub fn new(name: &str, description: &str) -> Self {
+        PrecisionPlan {
+            name: name.to_string(),
+            description: description.to_string(),
+        }
+    }
+}
+
+
 
 impl PrecisionPlan {
     pub fn compute_plan(&self, layer_data: &[f32], profiler: &mut Profiler) -> PrecisionPlanResult {
@@ -33,5 +58,22 @@ impl PrecisionPlan {
             }
         });
         Profile { load: load / 10.0 } // Normalize load
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir_generator::profiling::Profiler;
+
+    #[test]
+    fn test_precision_plan_computation() {
+        let plan = PrecisionPlan::new("Test Plan", "A test precision plan");
+        let layer_data = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+        let mut profiler = Profiler::new();
+
+        let result = plan.compute_plan(&layer_data, &mut profiler);
+        assert_eq!(result.precision, "int8");
+        assert!(result.sparsity >= 0.3);
     }
 }

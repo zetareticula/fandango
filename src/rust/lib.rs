@@ -18,6 +18,9 @@ pub mod kvcache_manager;
 pub mod runtime_scheduler;
 pub mod utils;
 
+#[cfg(feature = "quantized_model_loader")]
+pub mod quantized_model_loader;
+
 #[cfg(feature = "fused_attention")]
 pub mod fused_attention;
 
@@ -47,6 +50,48 @@ pub fn init() -> Result<()> {
     if tensor.device() != &device {
         return Err(candle_core::Error::from("Failed to initialize tensor on the specified device"));
     }
+    Ok(())
+}
+
+/// This function is used to set the device for the library.
+/// It allows the user to specify which device (CPU, CUDA, etc.) to use for computations.
+/// /// # Arguments
+/// /// * `device` - The device to set for the library.
+/// pub fn set_device(device: Device) -> Result<()> {
+    // Set the device for the library
+    // This is a placeholder implementation, actual implementation may vary
+    if device.is_cuda() {
+        // Initialize CUDA resources if necessary
+        candle_core::cuda::init()?;
+    } else if device.is_cpu() {
+        // Initialize CPU resources if necessary
+        candle_core::cpu::init()?;
+    } else {
+        return Err(candle_core::Error::from("Unsupported device type"));
+    }
+
+    // Ensure the device is valid
+    if !device.is_valid() {
+        return Err(candle_core::Error::from("Invalid device specified"));
+    }
+
+    // Set the default device for the library
+    // This is a placeholder implementation, actual implementation may vary
+    if !candle_core::Device::is_supported(&device) {
+        return Err(candle_core::Error::from("Device not supported by the library"));
+    }
+
+    // Initialize the autograd engine if needed
+    if device.is_autograd_supported() {
+        Autograd::init(&device)?;
+    }
+
+    // Initialize the device-specific resources
+    
+    
+    // Set the global device for the library
+    candle_core::set_default_device(device)?;
+    
     Ok(())
 }
 
