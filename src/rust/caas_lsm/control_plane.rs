@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 use tokio::sync::mpsc;
-use crate::kvcache_manager::KVCacheManager;
+use candle_core::Device;
+use anyhow::Result;
 
-pub struct ControlPlane {
-    csas: HashMap<String, mpsc::Sender<CompactionRequest>>, // CSA addresses
-    kvcache_mgr: KVCacheManager,
-    resource_monitor: ResourceMonitor,
-}
+use crate::{
+    nebula_integration::nebula_store::NebulaStore,
+    kvcache_manager::KVCacheManager,
+};
 
-struct CompactionRequest {
-    job_id: String,
-    data_access: Vec<String>,
-    priority: i32,
+#[derive(Debug)]
+pub struct CompactionRequest {
+    pub job_id: String,
+    pub data_access: Vec<String>,
+    pub priority: i32,
 }
 
 struct ResourceMonitor {
@@ -19,19 +20,28 @@ struct ResourceMonitor {
     load_levels: HashMap<String, f32>,
 }
 
+pub struct ControlPlane {
+    csas: HashMap<String, mpsc::Sender<CompactionRequest>>,
+    kvcache_mgr: KVCacheManager,
+    resource_monitor: ResourceMonitor,
+    nebula_store: NebulaStore,
+}
+
 impl ControlPlane {
-    pub fn new(kvcache_mgr: KVCacheManager) -> Self {
+    pub fn new(kvcache_mgr: KVCacheManager, device: Device) -> Result<Self> {
+        let nebula_store = NebulaStore::new(device)?;
         let (tx, rx) = mpsc::channel(32);
         let mut csas = HashMap::new();
         csas.insert("csa1".to_string(), tx);
-        ControlPlane {
+        Ok(ControlPlane {
             csas,
             kvcache_mgr,
             resource_monitor: ResourceMonitor {
                 available_csas: vec!["csa1".to_string()],
                 load_levels: HashMap::new(),
             },
-        }
+            nebula_store,
+        })
     }
 
     pub async fn schedule_compaction(&mut self, request: CompactionRequest) {
@@ -44,7 +54,7 @@ impl ControlPlane {
             if let Some(tx) = self.csas.get(&csa) {
                 tx.send(request).await.unwrap();
             } else {
-                // Fallback to local compaction
+                self.nebula_store.trigger_compaction(); // Fallback to Nebula compaction
                 self.kvcache_mgr.perform_local_compaction().await;
             }
         }
