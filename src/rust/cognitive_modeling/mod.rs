@@ -1,5 +1,12 @@
 use rand::Rng;
 use std::collections::HashMap;
+use std::vec::Vec;
+use std::hash::Hash;
+use std::collections::HashSet;
+use std::iter::FromIterator;
+use bloomfilter::Bloom;
+use fxhash;
+use std::fmt;
 
 /// CognitiveModel represents a cognitive model that uses Bayesian inference
 /// to update its theory space based on observations and likelihoods.

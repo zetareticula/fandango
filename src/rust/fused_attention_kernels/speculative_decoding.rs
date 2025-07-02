@@ -1,7 +1,7 @@
 use candle_core::{Tensor, Device, Result, DType};
 use std::collections::VecDeque;
 use crate::fused_attention_kernels::sparsity_manager::SparsityManager;
-use crate::monitoring;
+use crate::fused_attention_kernels::monitoring;
 
 pub struct SpeculativeDecoder {
     sparsity_mgr: SparsityManager,
@@ -31,31 +31,38 @@ impl SpeculativeDecoder {
 
         // Generate λ tokens from draft model (simulated)
         let draft_tokens = self.generate_draft_tokens(input_tokens, self.draft_lambda)?;
-        self.token_buffer.extend((0..draft_tokens.dim(0)?).map(|i| (i, draft_tokens.narrow(0, i, 1)?)));
+        
+        // Clear the buffer and add new draft tokens
+        self.token_buffer.clear();
+        for i in 0..draft_tokens.dim(0)? {
+            self.token_buffer.push_back((i, draft_tokens.narrow(0, i, 1)?));
+        }
 
         // Optimal window size based on acceptance ratio
         let optimal_window = (self.acceptance_ratio * (self.draft_lambda + 1) as f32).round() as usize;
-        optimal_window.min(self.window_size_k);
+        let window_size = optimal_window.min(self.window_size_k);
 
         // Verify tokens and decide which to keep
-        while !self.token_buffer.is_empty() {
+        while !self.token_buffer.is_empty() && verified_tokens.len() < window_size {
             let (token_idx, token) = self.token_buffer.pop_front().unwrap();
             if self.verify_token(&token)? {
                 verified_tokens.push(token);
-                if verified_tokens.len() >= optimal_window {
-                    break;
-                }
-            } else {
+            } else if token_idx + 1 < self.draft_lambda {
                 // Rejection, adjust buffer if needed
-                if token_idx + 1 < self.draft_lambda {
-                    self.token_buffer.push_back((token_idx + 1, token));
-                }
+                let next_token = draft_tokens.narrow(0, token_idx + 1, 1)?;
+                self.token_buffer.push_front((token_idx + 1, next_token));
+                break;
             }
         }
 
-        // Process verified tokens with sparsity manager
-        let verified_tensor = Tensor::cat(&verified_tokens, 0)?;
-        let output = self.sparsity_mgr.process_ffn(&verified_tensor)?;
+        let output = if !verified_tokens.is_empty() {
+            // Process verified tokens with sparsity manager
+            let verified_tensor = Tensor::cat(&verified_tokens, 0)?;
+            self.sparsity_mgr.process_ffn(&verified_tensor)?
+        } else {
+            // If no tokens were verified, return a zero tensor with the expected shape
+            Tensor::zeros((1, input_tokens.dim(1)?), DType::F32, &self.device)?
+        };
 
         let latency = start.elapsed().as_secs_f64();
         monitoring::record_latency(latency);
@@ -63,34 +70,47 @@ impl SpeculativeDecoder {
     }
 
     fn generate_draft_tokens(&self, input: &Tensor, lambda: usize) -> Result<Tensor> {
-        // Simulate draft model output
-        Tensor::randn(0f32, 1f32, (lambda, input.dim(1)?), &self.device)
+        // Simulate draft model output with random values between -1 and 1
+        let shape = (lambda, input.dim(1)?);
+        let rand_tensor = Tensor::rand(-1.0f32, 1.0f32, shape, &self.device)?;
+        Ok(rand_tensor)
     }
 
     fn verify_token(&self, token: &Tensor) -> Result<bool> {
-        // Simulate verification (e.g., compare with big model)
-        let threshold = 0.5;
-        Ok(token.mean()?.to_scalar::<f32>()? > threshold)
-    }
-}
-
-impl SpeculativeDecoder {
-    fn verify_token(&self, token: &Tensor) -> Result<bool> {
-        let result = candle_core::ops::mean(token)?.to_scalar::<f32>()? > 0.5;
-        if result {
+        // Get the mean value of the token tensor
+        let mean_val = token.mean_all()?.to_scalar::<f32>()?;
+        
+        // Simple threshold-based verification
+        let threshold = 0.0; // Adjust threshold as needed
+        let is_accepted = mean_val > threshold;
+        
+        // Record the result
+        if is_accepted {
             monitoring::record_speculative_accepted();
         } else {
             monitoring::record_speculative_rejected();
         }
-        Ok(result)
+        
+        Ok(is_accepted)
     }
 }
 
+// Implement SparsityManager's process_ffn method
 impl SparsityManager {
     pub fn process_ffn(&self, input: &Tensor) -> Result<Tensor> {
-        // Simulate processing with sparsity manager
-        let processed = input * 0.5; // Placeholder operation
-        Ok(processed)
+        // Simple FFN simulation with ReLU activation
+        let input_dim = input.dim(1)?;
+        let weight = Tensor::ones((input_dim, input_dim), DType::F32, input.device())?;
+        let bias = Tensor::zeros((input_dim,), DType::F32, input.device())?;
+        
+        // Linear transformation: output = input * weight^T + bias
+        let output = input.matmul(&weight.t()?)?;
+        let output = output.broadcast_add(&bias)?;
+        
+        // Apply ReLU activation
+        let output = output.relu()?;
+        
+        Ok(output)
     }
 }
 

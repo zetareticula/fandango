@@ -3,29 +3,36 @@ name = "fandango"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/rust/lib.rs"
+name = "fandango"
+
+[[bin]]
+name = "fandango"
+path = "src/bin/main.rs"
+
 [dependencies]
-actix-web = "4.3"
-serde = { version = "1.0", features = ["derive"] }
-sqlx = { version = "0.7", features = ["runtime-actix-rustls", "postgres"] }
-reqwest = { version = "0.11", features = ["json"] }
-stripe = "0.16"
-jsonwebtoken = "8.3"
-oauth2 = { version = "4.4", features = ["reqwest"] }
-capnp = "0.18"
-tokio = { version = "1.32", features = ["full"] }
-couchdb = "0.5" # Placeholder for Spanner-like key-value store
+tokio = { version = "1.32", features = ["full", "rt-multi-thread", "macros"] }
 log = "0.4"
+candle-core = { git = "https://github.com/huggingface/candle.git" }
+candle-nn = { git = "https://github.com/huggingface/candle.git" }
+thiserror = "1.0"
+anyhow = "1.0"
+ndarray = "0.15"
+serde = { version = "1.0", features = ["derive"] }
 
 [features]
+default = []
 enterprise = [] # Enable privileged features for Enterprise tier
-# Optional dependencies for additional functionality
+cuda = ["candle-core/cuda"]
+
 [dev-dependencies]
 actix-rt = "2.5" # Runtime for testing
-
-[workspace]
 
 [profile.dev]
 opt-level = 1
 
 [profile.release]
 opt-level = 3
+lto = true
+codegen-units = 1
