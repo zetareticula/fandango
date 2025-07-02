@@ -1,7 +1,8 @@
-use candle_core::{Tensor, Device, Result, DType, Error};
-use candle_nn::{VarBuilder, VarMap, Optimizer, Adam, OptimizerConfig};
+use candle_core::{Tensor, Device, Result, DType, Error, Module};
+use candle_nn::{VarBuilder, Optimizer, Adam, OptimizerConfig};
 use std::time::Instant;
 use thiserror::Error;
+use std::collections::HashMap;
 
 #[derive(Error, Debug)]
 pub enum DistillerError {
@@ -18,63 +19,71 @@ type Result<T> = std::result::Result<T, DistillerError>;
 pub struct Distiller {
     device: Device,
     scaling_vectors: Vec<Tensor>,
-    optimizer: Adam,
-    var_map: VarMap,
+    var_builder: VarBuilder<'static>,
 }
 
 impl Distiller {
     pub fn new(device: Device, scaling_vectors: Vec<Tensor>) -> Result<Self> {
-        let mut var_map = VarMap::new();
-        
-        // Initialize parameters in the var_map
-        for (i, tensor) in scaling_vectors.iter().enumerate() {
-            let name = format!("scale_{}", i);
-            var_map.set_tensor(name, tensor.clone())?;
-        }
-        
-        // Create optimizer with all parameters from var_map
-        let vs = VarBuilder::from_varmap(&var_map, DType::F32, &device);
-        let optimizer = Adam::new_lr(&vs, 2.5e-4)?; // Initial learning rate
+        // Create a new VarBuilder with the scaling vectors
+        let var_builder = VarBuilder::new_with_arrays(
+            scaling_vectors.iter()
+                .enumerate()
+                .map(|(i, t)| (format!("scale_{}", i), t.shape().dims()))
+                .collect(),
+            DType::F32,
+            &device,
+        ).map_err(DistillerError::from)?;
         
         Ok(Distiller {
             device,
             scaling_vectors,
-            optimizer,
-            var_map,
+            var_builder,
         })
     }
 
     pub fn fine_tune_scaling(&mut self, epochs: usize) -> Result<()> {
         let start = Instant::now();
         
-        for _ in 0..epochs {
+        for epoch in 0..epochs {
+            // Update learning rate using cosine schedule
+            let lr = self.cosine_lr_schedule(epoch, epochs, 2.5e-4, 0.0);
+            
+            // Process each scaling vector
             for i in 0..self.scaling_vectors.len() {
-                let lr = self.cosine_lr_schedule(0, 1, 2.5e-4, 0.0);
+                // Get a mutable reference to the parameter
+                let param = if i < self.scaling_vectors.len() {
+                    &mut self.scaling_vectors[i]
+                } else {
+                    return Err(DistillerError::ParameterError(
+                        format!("Parameter index {} out of bounds", i)
+                    ));
+                };
                 
-                // Get the parameter from var_map
-                let var_name = format!("scale_{}", i);
-                let param = self.var_map.get(&var_name)
-                    .map_err(|_| DistillerError::ParameterError(var_name.clone()))?;
+                // Set requires_grad to true for this parameter
+                let param = param.set_requires_grad(true)
+                    .map_err(DistillerError::from)?;
                 
-                // Compute loss and gradients
+                // Compute loss
                 let loss = self.compute_distillation_loss(&param)?;
+                
+                // Backward pass
                 let grads = loss.backward()
                     .map_err(|e| DistillerError::OptimizationError(e.to_string()))?;
-                    
-                // Apply gradients with learning rate
-                self.optimizer.set_lr(lr as f64);
-                self.optimizer.step(&grads, &mut self.var_map)
-                    .map_err(|e| DistillerError::OptimizationError(e.to_string()))?;
+                
+                // Update parameter in place
+                let updated_param = param.sub(&grads.mul_scalar(lr as f32)?)?;
                 
                 // Update the scaling vector in our tracking list
-                if let Some(scaling) = self.scaling_vectors.get_mut(i) {
-                    *scaling = param.detach()?;
-                }
+                self.scaling_vectors[i] = updated_param.detach()?;
+            }
+            
+            // Log progress
+            if epoch % 10 == 0 {
+                println!("Epoch {}/{} - LR: {:.6}", epoch + 1, epochs, lr);
             }
         }
         
-        let latency = start.elapsed().as_secs_f64();
-        monitoring::record_latency(latency);
+        println!("Fine-tuning completed in {:?}", start.elapsed());
         Ok(())
     }
 

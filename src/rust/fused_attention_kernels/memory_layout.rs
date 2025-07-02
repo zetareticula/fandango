@@ -1,4 +1,15 @@
-use candle_core::{Tensor, Device, DType, Result};
+use candle_core::{Tensor, Device, DType, Result, Error};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum MemoryLayoutError {
+    #[error("Memory layout is full")]
+    OutOfMemory,
+    #[error("Tensor operation failed: {0}")]
+    TensorError(#[from] candle_core::Error),
+}
+
+type Result<T> = std::result::Result<T, MemoryLayoutError>;
 
 /// FFNMemoryLayout is a structure that holds the memory layout for a feed-forward network (FFN).
 /// It manages the matrix of weights, pointers to original neuron indices, biases, and tracks the number of utilized rows and last k active neurons.
@@ -13,7 +24,8 @@ pub struct FFNMemoryLayout {
 impl FFNMemoryLayout {
     pub fn new(layer_size: usize) -> Result<Self> {
         let device = Device::Cpu;
-        let matrix = Tensor::zeros((layer_size, 128), DType::F32, &device)?;
+        let matrix = Tensor::zeros((layer_size, 128), DType::F32, &device)
+            .map_err(MemoryLayoutError::from)?;
         
         Ok(FFNMemoryLayout {
             matrix,
@@ -25,22 +37,28 @@ impl FFNMemoryLayout {
     }
 
     pub fn add_neuron(&mut self, neuron_idx: usize, weight_row: Vec<f32>, bias: f32) -> Result<()> {
-        if self.num_used >= self.matrix.dim(0)? {
-            return Err(candle_core::Error::Msg("Memory layout full".to_string()));
+        let total_rows = self.matrix.dim(0).map_err(MemoryLayoutError::from)?;
+        if self.num_used >= total_rows {
+            return Err(MemoryLayoutError::OutOfMemory);
+        }
+        
+        // Create a new tensor for the weight row
+        let weight_tensor = Tensor::from_vec(weight_row, (1, 128), self.matrix.device())
+            .map_err(MemoryLayoutError::from)?;
+        
+        if self.num_used == 0 {
+            // First row - just assign directly
+            self.matrix = weight_tensor;
+        } else {
+            // For subsequent rows, we need to concatenate
+            let top = self.matrix.narrow(0, 0, self.num_used)
+                .map_err(MemoryLayoutError::from)?;
+            self.matrix = Tensor::cat(&[&top, &weight_tensor], 0)
+                .map_err(MemoryLayoutError::from)?;
         }
         
         self.pointers.push(neuron_idx);
         self.bias[self.num_used] = bias;
-        
-        // Create a new tensor for the weight row
-        let weight_tensor = Tensor::from_vec(weight_row, (1, 128), self.matrix.device())?;
-        
-        // Get the slice of the matrix we want to update
-        let mut matrix_slice = self.matrix.narrow(0, self.num_used, 1)?;
-        
-        // Use assign to copy the data from weight_tensor to matrix_slice
-        matrix_slice.assign(&weight_tensor)?;
-        
         self.num_used += 1;
         self.last_k_active.push(neuron_idx);
         
