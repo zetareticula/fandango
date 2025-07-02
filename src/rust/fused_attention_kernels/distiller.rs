@@ -1,6 +1,19 @@
-use candle_core::{Tensor, Device, Result, DType};
-use candle_nn::{VarBuilder, VarMap, Optimizer, Adam};
+use candle_core::{Tensor, Device, Result, DType, Error};
+use candle_nn::{VarBuilder, VarMap, Optimizer, Adam, OptimizerConfig};
 use std::time::Instant;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum DistillerError {
+    #[error("Failed to get parameter {0}")]
+    ParameterError(String),
+    #[error("Optimization error: {0}")]
+    OptimizationError(String),
+    #[error(transparent)]
+    CandleError(#[from] candle_core::Error),
+}
+
+type Result<T> = std::result::Result<T, DistillerError>;
 
 pub struct Distiller {
     device: Device,
@@ -16,13 +29,12 @@ impl Distiller {
         // Initialize parameters in the var_map
         for (i, tensor) in scaling_vectors.iter().enumerate() {
             let name = format!("scale_{}", i);
-            var_map.insert(name, tensor.clone())?;
+            var_map.set_tensor(name, tensor.clone())?;
         }
         
         // Create optimizer with all parameters from var_map
         let vs = VarBuilder::from_varmap(&var_map, DType::F32, &device);
-        let params = vs.data().values().cloned().collect();
-        let optimizer = Adam::new(params, 2.5e-4)?; // Initial learning rate
+        let optimizer = Adam::new_lr(&vs, 2.5e-4)?; // Initial learning rate
         
         Ok(Distiller {
             device,
@@ -41,16 +53,18 @@ impl Distiller {
                 
                 // Get the parameter from var_map
                 let var_name = format!("scale_{}", i);
-                let param = self.var_map.get(&var_name).ok_or_else(|| 
-                    candle_core::Error::Msg(format!("Parameter {} not found", var_name))
-                )?;
+                let param = self.var_map.get(&var_name)
+                    .map_err(|_| DistillerError::ParameterError(var_name.clone()))?;
                 
                 // Compute loss and gradients
-                let loss = self.compute_distillation_loss(param)?;
-                let grads = loss.backward()?;
-                
-                // Apply gradients with optimizer
-                self.optimizer.step(&grads, lr as f32)?;
+                let loss = self.compute_distillation_loss(&param)?;
+                let grads = loss.backward()
+                    .map_err(|e| DistillerError::OptimizationError(e.to_string()))?;
+                    
+                // Apply gradients with learning rate
+                self.optimizer.set_lr(lr as f64);
+                self.optimizer.step(&grads, &mut self.var_map)
+                    .map_err(|e| DistillerError::OptimizationError(e.to_string()))?;
                 
                 // Update the scaling vector in our tracking list
                 if let Some(scaling) = self.scaling_vectors.get_mut(i) {
@@ -69,6 +83,7 @@ impl Distiller {
         let target = Tensor::ones(scaling.shape(), DType::F32, &self.device)?;
         let diff = scaling.sub(&target)?;
         diff.sqr()?.mean_all()
+            .map_err(DistillerError::from)
     }
 
     fn cosine_lr_schedule(&self, _iter: usize, _max_iter: usize, initial_lr: f64, min_lr: f64) -> f64 {

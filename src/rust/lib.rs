@@ -43,10 +43,11 @@ pub fn init() -> Result<()> {
     let device = Device::Cpu; // Default to CPU, can be changed to CUDA or other devices
     let dtype = DType::F32; // Default data type, can be changed as needed
 
-    // Create a zero tensor instead of using non-existent empty()
+    // Create a zero tensor
     let tensor = Tensor::zeros((1, 1), dtype, &device)?;
 
-    if tensor.device() != &device {
+    // Compare device types
+    if !tensor.device().same_device(&device) {
         return Err(Error::Msg("Failed to initialize tensor on the specified device".to_string()));
     }
     Ok(())

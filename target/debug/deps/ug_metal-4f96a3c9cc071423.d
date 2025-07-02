@@ -1,0 +1,11 @@
+/Users/xaxpmore/Documents/GitHub/fandango/target/debug/deps/libug_metal-4f96a3c9cc071423.rmeta: /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/lib.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/code_gen.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/runtime.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/utils.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/mlx_gemm.metal
+
+/Users/xaxpmore/Documents/GitHub/fandango/target/debug/deps/libug_metal-4f96a3c9cc071423.rlib: /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/lib.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/code_gen.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/runtime.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/utils.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/mlx_gemm.metal
+
+/Users/xaxpmore/Documents/GitHub/fandango/target/debug/deps/ug_metal-4f96a3c9cc071423.d: /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/lib.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/code_gen.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/runtime.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/utils.rs /Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/mlx_gemm.metal
+
+/Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/lib.rs:
+/Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/code_gen.rs:
+/Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/runtime.rs:
+/Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/utils.rs:
+/Users/xaxpmore/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ug-metal-0.4.0/src/mlx_gemm.metal:

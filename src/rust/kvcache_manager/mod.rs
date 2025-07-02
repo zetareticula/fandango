@@ -1,4 +1,31 @@
+use std::sync::{Arc, Mutex};
 use crate::caas_lsm::{ControlPlane, CompactionRequest};
+
+/// A simple in-memory buffer for key-value storage
+struct MemoryBuffer {
+    capacity: usize,
+    data: Vec<u8>,
+}
+
+impl MemoryBuffer {
+    /// Create a new MemoryBuffer with the given capacity in bytes
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            data: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Get the current size of the buffer
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Get the capacity of the buffer
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+}
 
 pub struct KVCacheManager {
     buffer: Arc<Mutex<MemoryBuffer>>,
