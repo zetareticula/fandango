@@ -1,77 +1,54 @@
-use std::sync::{Arc, Mutex};
-use candle_core::{Tensor, Device, DType, Result};
-use crate::caas_lsm::{ControlPlane, CompactionRequest};
-use crate::nebula_integration::nebula_store::NebulaStore;
-
-/// A simple in-memory buffer for key-value storage
-struct MemoryBuffer {
-    capacity: usize,
-    data: Vec<u8>,
-}
-
-impl MemoryBuffer {
-    /// Create a new MemoryBuffer with the given capacity in bytes
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            data: Vec::with_capacity(capacity),
-        }
-    }
-
-    /// Get the current size of the buffer
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Get the capacity of the buffer
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
-}
-use candle_core::{Device, Result};
-
+use crate::storage_engine::{SelfDesigningEngine, LearnedStructure};
 
 pub struct KVCacheManager {
     buffer: Arc<Mutex<MemoryBuffer>>,
-    control_plane: ControlPlane,
-    nebula_store: NebulaStore,
     device: Device,
+    self_engine: Option<SelfDesigningEngine>,
+    learned_struct: Option<LearnedStructure>,
 }
 
 impl KVCacheManager {
-    pub fn new(device: Device) -> Result<Self> {
-        let buffer = Arc::new(Mutex::new(MemoryBuffer::new(1024 * 1024))); // 1MB buffer
-        let nebula_store = NebulaStore::new(device.clone())?;
-        let control_plane = ControlPlane::new(nebula_store.clone(), device.clone())?;
-        
-        Ok(KVCacheManager { 
-            buffer, 
-            control_plane, 
-            nebula_store,
+    pub fn new(device: Device) -> Self {
+        KVCacheManager {
+            buffer: Arc::new(Mutex::new(MemoryBuffer::new(1024 * 1024 * 1024))),
             device,
-        })
+            self_engine: None,
+            learned_struct: None,
+        }
     }
 
-    pub async fn update_precision(&mut self, attention_data: &[f32], system_load: f32) {
-        let request = CompactionRequest {
-            job_id: "job_1".to_string(),
-            data_access: vec!["data_1".to_string()],
-            priority: 1,
-        };
-        self.control_plane.schedule_compaction(request).await;
+    pub fn configure_structures(&mut self, structures: &HashSet<String>) {
+        if structures.contains("filter") || structures.contains("cache") {
+            self.self_engine = Some(SelfDesigningEngine::new(self.device.clone(), 5000, 3000.0).unwrap());
+        }
+        if structures.contains("learned_index") {
+            self.learned_struct = Some(LearnedStructure::new(self.device.clone()).unwrap());
+        }
+    }
+
+    pub async fn update_precision(&mut self, attention_data: &[f32], system_load: f32) -> Result<()> {
+        let tensor = Tensor::from_vec(attention_data.to_vec(), (attention_data.len(), 1), &self.device)?
+            .to_dtype(DType::F32)?;
+
+        if let Some(ref mut engine) = self.self_engine {
+            engine.design_optimal_engine()?;
+        }
+
+        if let Some(ref mut learned) = self.learned_struct {
+            let optimized_data = learned.optimize(&tensor)?;
+            self.buffer.lock().unwrap().update(&optimized_data.to_vec1::<f32>()?);
+        }
+
+        Ok(())
     }
 
     pub async fn perform_local_compaction(&self) {
-        let mut buffer = self.buffer.lock().unwrap();
-        self.nebula_store.trigger_compaction(); // Sync with Nebula
-        println!("Performing local compaction");
-    }
-
-    pub async fn perform_remote_compaction(&self, job_id: &str, data_access: &[String]) -> Result<()> {
-        // Create a sample tensor to store
-        let tensor = Tensor::ones((1024, 1024), DType::F32, &self.device)?;
-        self.nebula_store.store_tensor("compaction_tensor", &tensor)?;
-        println!("Fetching and compacting {} remotely", job_id);
-        Ok(())
+        if let Some(ref learned) = self.learned_struct {
+            // Handle write inefficiency
+            for i in 0..100 {
+                learned.write(i, 1.0).unwrap_or_else(|e| println!("Write error: {}", e));
+            }
+        }
+        println!("Performing local compaction with learned structures");
     }
 }
