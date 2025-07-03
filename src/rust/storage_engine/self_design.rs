@@ -1,20 +1,12 @@
-use candle_core::{Tensor, Device, Result};
-use std::collections::{HashMap, HashSet};
-use crate::kvcache_manager::KVCacheManager;
+use crate::storage_engine::cosine_integration::CosineIntegration;
 
 pub struct SelfDesigningEngine {
     device: Device,
     data_structures: HashMap<String, DataStructure>,
-    budget: f32, // Constrained budget (e.g., memory, compute)
+    budget: f32,
     dataset_size: usize,
     kvcache_mgr: KVCacheManager,
-}
-
-struct DataStructure {
-    name: String,
-    memory_footprint: usize,
-    read_perf: f32,
-    write_perf: f32,
+    cosine_int: Option<CosineIntegration>,
 }
 
 impl SelfDesigningEngine {
@@ -26,12 +18,6 @@ impl SelfDesigningEngine {
             read_perf: 0.9,
             write_perf: 0.5,
         });
-        data_structures.insert("cache".to_string(), DataStructure {
-            name: "cache".to_string(),
-            memory_footprint: 2048,
-            read_perf: 0.95,
-            write_perf: 0.3,
-        });
         let kvcache_mgr = KVCacheManager::new(device.clone());
         Ok(SelfDesigningEngine {
             device,
@@ -39,23 +25,19 @@ impl SelfDesigningEngine {
             budget,
             dataset_size,
             kvcache_mgr,
+            cosine_int: None,
         })
     }
 
     pub fn design_optimal_engine(&mut self) -> Result<()> {
-        let mut selected_structures = HashSet::new();
-        let mut total_cost = 0;
-
-        for (name, ds) in &self.data_structures {
-            if total_cost + ds.memory_footprint as f32 <= self.budget && self.dataset_size > 1000 {
-                // Scale with dataset size and budget constraint
-                selected_structures.insert(name.clone());
-                total_cost += ds.memory_footprint;
-            }
+        if self.cosine_int.is_none() {
+            self.cosine_int = Some(CosineIntegration::new(self.device.clone(), self.dataset_size, self.budget)?);
         }
-
-        // Simulate self-design: configure KVCacheManager
-        self.kvcache_mgr.configure_structures(&selected_structures);
+        if let Some(ref mut cosine) = self.cosine_int {
+            let workload = 0.8; // Example read-heavy workload
+            let designs = cosine.optimize_design(workload)?;
+            self.kvcache_mgr.configure_structures(&designs);
+        }
         Ok(())
     }
 }

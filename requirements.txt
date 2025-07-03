@@ -1,0 +1,23 @@
+candle-core==0.4
+triton-client==0.2
+ndarray==0.15
+criterion==0.5
+half==2.0
+thiserror==1.0
+anyhow==1.0
+pytriton==0.2
+
+pybind11==2.11
+
+# For minikube
+minikube==1.49.0
+kubectl==1.28.0
+
+# For k8s
+k8s==1.28.0
+
+
+# For Nebula
+nebula==1.28.0
+pyyaml==6.0
+

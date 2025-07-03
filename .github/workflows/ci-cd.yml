@@ -37,17 +37,23 @@ jobs:
     - name: Test
       run: cargo test --release --features cuda
 
-    - name: Test Disaggregated Setup
+    - name: Build Docker image
       run: |
-        mkdir -p build
-        cd build
-        cmake ..
-        make -j100
-        ./procp_server & # Simulate Control Plane
-        ./csa_server &   # Simulate CSA
-        sleep 5
-        cargo run --release --bin fandango -- --db=/tmp/fandango
+        docker build -t fandango:latest --build-arg CUDA_VERSION=12.2.0 .
+        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        docker push fandango:latest
+
+    - name: Test image in k8s
+      run: |
+        minikube start --driver=docker --nodes 1 --addons=ingress --kubernetes-version=v1.28.0
+        kubectl apply -f k8s/deployment.yaml
+        sleep 60
+        kubectl get pods
+        kubectl logs -l app=fandango
+        kubectl delete -f k8s/deployment.yaml
+      env:
+        TRITON_URL: "localhost:8001"
 
     - name: Cleanup
       if: always()
-      run: pkill -f procp_server || true; pkill -f csa_server || true
+      run: minikube delete
