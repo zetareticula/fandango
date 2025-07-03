@@ -1,0 +1,1 @@
+f32: Borrow<candle_core::Tensor>

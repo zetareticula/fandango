@@ -1,3 +1,58 @@
+use candle_core::{Tensor, DType, Result, Device};
+use std::sync::{Arc, Mutex};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum KVCacheError {
+    #[error("Tensor operation failed: {0}")]
+    TensorError(String),
+    #[error(transparent)]
+    CandleError(#[from] candle_core::Error),
+}
+
+pub type Result<T> = std::result::Result<T, KVCacheError>;
+
+/// A simple memory buffer for storing key-value cache data
+struct MemoryBuffer {
+    data: Vec<u8>,
+    capacity: usize,
+}
+
+impl MemoryBuffer {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    pub fn update(&mut self, data: &[f32]) -> Result<()> {
+        // Convert f32 data to bytes
+        let bytes: Vec<u8> = data
+            .iter()
+            .flat_map(|&f| f.to_le_bytes().to_vec())
+            .collect();
+
+        if bytes.len() > self.capacity {
+            return Err(KVCacheError::TensorError(
+                "Data size exceeds buffer capacity".to_string(),
+            ));
+        }
+
+        self.data.clear();
+        self.data.extend_from_slice(&bytes);
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+}
+
 use crate::storage_engine::{SelfDesigningEngine, LearnedStructure, DesignSpace, CosineIntegration};
 
 pub struct KVCacheManager {
@@ -37,7 +92,12 @@ impl KVCacheManager {
         if let Some(ref mut learned) = self.learned_struct {
             learned.adjust_levels(system_load)?; // Dynamic adjustment
             let optimized_data = learned.optimize(&tensor)?;
-            self.buffer.lock().unwrap().update(&optimized_data.to_vec1::<f32>()?);
+            
+            // Convert the tensor to Vec<f32> and update the buffer
+            let data = optimized_data.to_vec1::<f32>()?;
+            if let Err(e) = self.buffer.lock().unwrap().update(&data) {
+                log::error!("Failed to update buffer: {}", e);
+            }
         }
 
         if let Some(ref mut engine) = self.self_engine {

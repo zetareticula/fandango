@@ -1,5 +1,5 @@
 use candle_core::{Tensor, Device, Result, DType, Error, Module};
-use candle_nn::{VarBuilder, Optimizer, Adam, OptimizerConfig};
+use candle_nn::{VarBuilder, Optimizer, Adam, OptimizerConfig, VarMap, SGD};
 use std::time::Instant;
 use thiserror::Error;
 use std::collections::HashMap;
@@ -25,14 +25,11 @@ pub struct Distiller {
 impl Distiller {
     pub fn new(device: Device, scaling_vectors: Vec<Tensor>) -> Result<Self> {
         // Create a new VarBuilder with the scaling vectors
-        let var_builder = VarBuilder::new_with_arrays(
-            scaling_vectors.iter()
-                .enumerate()
-                .map(|(i, t)| (format!("scale_{}", i), t.shape().dims()))
-                .collect(),
-            DType::F32,
-            &device,
-        ).map_err(DistillerError::from)?;
+        let mut vars = HashMap::new();
+        for (i, tensor) in scaling_vectors.iter().enumerate() {
+            vars.insert(format!("scale_{}", i), tensor.clone());
+        }
+        let var_builder = VarBuilder::from_tensors(vars, DType::F32, &device);
         
         Ok(Distiller {
             device,
@@ -44,37 +41,43 @@ impl Distiller {
     pub fn fine_tune_scaling(&mut self, epochs: usize) -> Result<()> {
         let start = Instant::now();
         
+        // Create a VarMap and VarBuilder for the parameters
+        let mut varmap = VarMap::new();
+        let vs = VarBuilder::from_varmap(&varmap, DType::F32, &self.device);
+        
+        // Store parameters in the VarMap using VarBuilder
+        for (i, param) in self.scaling_vectors.iter().enumerate() {
+            let shape = param.dims();
+            // Create a new variable with the same shape and device
+            let var = vs.get(shape, &format!("scale_{}", i))?;
+            // Copy the parameter data to the variable
+            var.copy_(&param)?;
+        }
+        
+        // Create an optimizer with the variables from the VarMap
+        let mut opt = SGD::new(varmap.all_vars(), 0.1)?;
+        
         for epoch in 0..epochs {
             // Update learning rate using cosine schedule
             let lr = self.cosine_lr_schedule(epoch, epochs, 2.5e-4, 0.0);
             
             // Process each scaling vector
             for i in 0..self.scaling_vectors.len() {
-                // Get a mutable reference to the parameter
-                let param = if i < self.scaling_vectors.len() {
-                    &mut self.scaling_vectors[i]
-                } else {
-                    return Err(DistillerError::ParameterError(
-                        format!("Parameter index {} out of bounds", i)
-                    ));
-                };
-                
-                // Set requires_grad to true for this parameter
-                let param = param.set_requires_grad(true)
-                    .map_err(DistillerError::from)?;
+                // Get the parameter from the VarMap
+                let var_name = format!("scale_{}", i);
+                let var = varmap.get(&var_name, vs.dtype(), vs.device())?;
                 
                 // Compute loss
-                let loss = self.compute_distillation_loss(&param)?;
+                let loss = self.compute_distillation_loss(&var)?;
                 
                 // Backward pass
-                let grads = loss.backward()
-                    .map_err(|e| DistillerError::OptimizationError(e.to_string()))?;
+                let grads = loss.backward()?;
                 
-                // Update parameter in place
-                let updated_param = param.sub(&grads.mul_scalar(lr as f32)?)?;
+                // Update parameter using the optimizer with learning rate
+                opt.step(&grads)?;
                 
                 // Update the scaling vector in our tracking list
-                self.scaling_vectors[i] = updated_param.detach()?;
+                self.scaling_vectors[i] = var.detach();
             }
             
             // Log progress

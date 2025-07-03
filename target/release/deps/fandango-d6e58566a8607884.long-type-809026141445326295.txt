@@ -1,0 +1,4 @@
+(usize, candle_core::tensor::Tensor)
+result::Result<Infallible, candle_core::error::Error>
+(usize, candle_core::Tensor)
+std::result::Result<Infallible, candle_core::Error>

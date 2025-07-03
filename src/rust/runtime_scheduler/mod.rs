@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
+use candle_core::Device;
 use crate::kvcache_manager::KVCacheManager;
 use crate::cognitive_modeling::{CognitiveModel, MCMCSearch};
 
@@ -32,9 +33,9 @@ pub struct RuntimeScheduler {
 }
 
 impl RuntimeScheduler {
-    pub fn new() -> Self {
+    pub fn new(device: Device) -> Self {
         let (tx, rx) = mpsc::channel(32);
-        let kv_cache_mgr = Arc::new(Mutex::new(KVCacheManager::new()));
+        let kv_cache_mgr = Arc::new(Mutex::new(KVCacheManager::new(device)));
         
         // Create and spawn the prefetch manager
         let prefetch_mgr = PrefetchManager::new(rx, Arc::clone(&kv_cache_mgr));
@@ -62,7 +63,6 @@ impl RuntimeScheduler {
         if let Err(e) = self.tx.send(job_id.to_string()).await {
             eprintln!("Failed to send job to prefetch manager: {}", e);
         }
-        self.kv_cache_mgr.update_precision(&vec![0.0; 64], 0.5).await;
     }
 }
 

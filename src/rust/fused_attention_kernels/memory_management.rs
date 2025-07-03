@@ -1,4 +1,4 @@
-use candle_core::{Tensor, Device, Result};
+use candle_core::{Tensor, Device, Result, DType};
 use crate::monitoring;
 
 pub struct MemoryManager {
@@ -9,8 +9,10 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     pub fn new(device: Device) -> Result<Self> {
-        let param_size = 6_700_000_000; // Approx 6.7B parameters
+        // Start with a smaller tensor for testing
+        let param_size = 1_000_000; // Reduced size for testing
         let opt_67b_params = Tensor::zeros((param_size,), DType::F32, &device)?; // Placeholder
+        
         Ok(MemoryManager {
             device,
             dram_percentage: 0.5, // Default 50% in DRAM

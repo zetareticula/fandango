@@ -1,19 +1,37 @@
-use candle_core::{Tensor, Device, Result, DType, Error};
-use candle_nn::{VarBuilder, Module, Linear, VarMap};
+use candle_core::{Tensor, Device};
+use candle_nn::{Module, Linear};
 use std::collections::VecDeque;
-use ndarray::Array2;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SparsityError {
     #[error("Neural network prediction error: {0}")]
     PredictionError(String),
     #[error("SVD computation failed: {0}")]
+    SvdError(String),
+    #[error("Candle error: {0}")]
+    CandleError(#[from] candle_core::Error),
+}
+
+#[derive(Debug)]
+pub enum SparsityErrorType {
+    #[error("Neural network prediction error: {0}")]
+    PredictionError(String),
+    #[error("SVD computation failed: {0}")]
     SVDError(String),
+    #[error("Tensor operation failed: {0}")]
+    TensorError(String),
     #[error(transparent)]
     CandleError(#[from] candle_core::Error),
     #[error(transparent)]
     IOError(#[from] std::io::Error),
+}
+
+
+impl From<SparsityError> for candle_core::Error {
+    fn from(err: SparsityError) -> Self {
+        candle_core::Error::Msg(err.to_string())
+    }
 }
 
 type Result<T> = std::result::Result<T, SparsityError>;
@@ -39,32 +57,22 @@ pub struct SparsityManager {
     rank: usize,
 }
 
-struct NeuralPredictor {
+pub struct NeuralPredictor {
     linear1: Linear,
     linear2: Linear,
     device: Device,
 }
 
 impl NeuralPredictor {
-    fn new(device: &Device) -> Result<Self> {
-        // Create a new VarBuilder with a unique ID for this predictor
-        let vs = VarBuilder::new_with_arrays(
-            vec![
-                ("linear1.weight", (32, 64)),
-                ("linear1.bias", (32,)),
-                ("linear2.weight", (1, 32)),
-                ("linear2.bias", (1,)),
-            ],
-            DType::F32,
-            device,
-        ).map_err(SparsityError::from)?;
+    pub fn new(device: &Device) -> Result<Self> {
+        // Initialize weights and biases directly
+        let linear1_weight = Tensor::randn(0.0, 0.02, (32, 64), device)?;
+        let linear1_bias = Tensor::zeros(32, DType::F32, device)?;
+        let linear1 = Linear::new(linear1_weight, Some(linear1_bias));
         
-        // Create linear layers directly from the VarBuilder
-        let linear1 = candle_nn::linear(64, 32, vs.pp("linear1"))
-            .map_err(SparsityError::from)?;
-            
-        let linear2 = candle_nn::linear(32, 1, vs.pp("linear2"))
-            .map_err(SparsityError::from)?;
+        let linear2_weight = Tensor::randn(0.0, 0.02, (1, 32), device)?;
+        let linear2_bias = Tensor::zeros(1, DType::F32, device)?;
+        let linear2 = Linear::new(linear2_weight, Some(linear2_bias));
         
         Ok(NeuralPredictor {
             linear1,
@@ -74,16 +82,12 @@ impl NeuralPredictor {
     }
 
     fn predict(&self, input: &Tensor) -> Result<Vec<usize>> {
-        let h = self.linear1.forward(input)
-            .map_err(|e| SparsityError::PredictionError(e.to_string()))?;
-            
-        let output = self.linear2.forward(&h)
-            .and_then(|x| candle_core::ops::sigmoid(&x))
-            .map_err(|e| SparsityError::PredictionError(e.to_string()))?;
-            
+        let h = self.linear1.forward(input)?;
+        // Use sigmoid function from candle_nn::ops
+        let output = candle_nn::ops::sigmoid(&self.linear2.forward(&h)?)?;
+        
         let threshold = 0.5;
-        let indices = output.to_vec1::<f32>()
-            .map_err(|e| SparsityError::PredictionError(e.to_string()))?
+        let indices = output.to_vec1::<f32>()?
             .into_iter()
             .enumerate()
             .filter(|(_, v)| *v > threshold)
@@ -98,7 +102,7 @@ impl SparsityManager {
     pub fn new(device: Device, window_size: usize, rank: usize) -> Result<Self> {
         let attention_weights = Tensor::zeros((1024, 1024), DType::F32, &device)?;
         let triton_attn = TritonAttention::new(device.clone())
-            .map_err(|e| SparsityError::CandleError(e))?;
+            .map_err(|e| SparsityError::CandleError(e.into()))?;
             
         // Initialize neural predictor if needed
         let nn_predictor = if window_size > 0 {
@@ -122,7 +126,7 @@ impl SparsityManager {
         })
     }
 
-    fn load_real_data() -> Result<Vec<(usize, f32)>, std::io::Error> {
+    fn load_real_data() -> std::result::Result<Vec<(usize, f32)>, std::io::Error> {
         // Simulate loading from neuron_activity.csv
         Ok(vec![(0, 0.9), (1, 0.1), (2, 0.8)]) // Placeholder
     }
