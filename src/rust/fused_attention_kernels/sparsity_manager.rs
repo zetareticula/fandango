@@ -1,36 +1,33 @@
-use candle_core::{Tensor, Device};
+use candle_core::{Tensor, Device, DType};
 use candle_nn::{Module, Linear};
 use std::collections::VecDeque;
 use thiserror::Error;
 
+/// Custom error type for sparsity management operations
 #[derive(Debug, Error)]
 pub enum SparsityError {
-    #[error("Neural network prediction error: {0}")]
-    PredictionError(String),
-    #[error("SVD computation failed: {0}")]
-    SvdError(String),
-    #[error("Candle error: {0}")]
-    CandleError(#[from] candle_core::Error),
-}
-
-#[derive(Debug)]
-pub enum SparsityErrorType {
-    #[error("Neural network prediction error: {0}")]
-    PredictionError(String),
+    #[error("Neural network prediction failed: {0}")]
+    NeuralNetworkError(String),
+    
     #[error("SVD computation failed: {0}")]
     SVDError(String),
+    
     #[error("Tensor operation failed: {0}")]
     TensorError(String),
+    
     #[error(transparent)]
     CandleError(#[from] candle_core::Error),
+    
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
 
-
 impl From<SparsityError> for candle_core::Error {
     fn from(err: SparsityError) -> Self {
-        candle_core::Error::Msg(err.to_string())
+        match err {
+            SparsityError::CandleError(e) => e,
+            _ => candle_core::Error::Msg(err.to_string()),
+        }
     }
 }
 
@@ -82,19 +79,33 @@ impl NeuralPredictor {
     }
 
     fn predict(&self, input: &Tensor) -> Result<Vec<usize>> {
-        let h = self.linear1.forward(input)?;
-        // Use sigmoid function from candle_nn::ops
-        let output = candle_nn::ops::sigmoid(&self.linear2.forward(&h)?)?;
-        
-        let threshold = 0.5;
-        let indices = output.to_vec1::<f32>()?
-            .into_iter()
-            .enumerate()
-            .filter(|(_, v)| *v > threshold)
-            .map(|(i, _)| i)
-            .collect();
+        // Validate input dimensions
+        if input.dims().len() != 2 || input.dims()[1] != 64 {
+            return Err(SparsityError::TensorError(format!(
+                "Expected input shape [batch, 64], got {:?}",
+                input.dims()
+            )));
+        }
+
+        // Forward pass through the network
+        let h = self.linear1.forward(input)
+            .map_err(|e| SparsityError::NeuralNetworkError(format!("First linear layer failed: {}", e)))?;
             
-        Ok(indices)
+        // Apply sigmoid activation
+        let output = candle_nn::ops::sigmoid(
+            &self.linear2.forward(&h)
+                .map_err(|e| SparsityError::NeuralNetworkError(format!("Second linear layer failed: {}", e)))?
+        ).map_err(|e| SparsityError::NeuralNetworkError(format!("Sigmoid activation failed: {}", e)))?;
+        
+        // Convert output to binary predictions
+        let output_vec = output.to_vec1::<f32>()
+            .map_err(|e| SparsityError::TensorError(format!("Failed to convert tensor to vec: {}", e)))?;
+            
+        let result = output_vec.into_iter()
+            .map(|val| if val > 0.5 { 1 } else { 0 })
+            .collect();
+        
+        Ok(result)
     }
 }
 
@@ -108,7 +119,7 @@ impl SparsityManager {
         let nn_predictor = if window_size > 0 {
             if let Ok(_data) = Self::load_real_data() {
                 Some(NeuralPredictor::new(&device)
-                    .map_err(|e| SparsityError::PredictionError(e.to_string()))?)
+                    .map_err(|e| SparsityError::NeuralNetworkError(e.to_string()))?)
             } else {
                 None
             }

@@ -1,4 +1,4 @@
-use candle_core::{Tensor, Device, DType, Result, Error};
+use candle_core::{Tensor, DType, Device};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

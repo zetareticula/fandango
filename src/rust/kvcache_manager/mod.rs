@@ -1,4 +1,4 @@
-use candle_core::{Tensor, DType, Result, Device};
+use candle_core::{Tensor, DType, Device};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 

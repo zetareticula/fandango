@@ -69,7 +69,7 @@ impl FusedAttention {
             var_map.load(path).context("Failed to load weights")?;
         }
         
-        let vb = VarBuilder::from_varmap(&var_map, DType::F32, &device);
+        let _vb = VarBuilder::from_varmap(&var_map, DType::F32, &device);
         
         // Initialize weights and biases with proper shape and device
         let q_weight = vs.get((hidden_dim, input_dim), "q_proj.weight")?;

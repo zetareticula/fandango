@@ -3,50 +3,41 @@
 
 pub mod fused_attention;
 pub mod sparsity_manager;
-pub mod memory_layout;
-pub mod cuda_triton;
 pub mod distiller;
+pub mod memory_layout;
+pub mod memory_management;
 pub mod speculative_decoding;
 pub mod wasm;
 
-// Re-export the main types
-pub use fused_attention::{FusedAttention, AttentionError};
+// Re-export the main types for easier access
+pub use crate::fused_attention_kernels::fused_attention::FusedAttention;
+pub use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, NeuralPredictor};
+pub use crate::fused_attention_kernels::distiller::Distiller;
+pub use crate::fused_attention_kernels::memory_layout::FFNMemoryLayout;
+pub use crate::fused_attention_kernels::memory_management::MemoryManager;
+pub use crate::fused_attention_kernels::speculative_decoding::SpeculativeDecoder;
 
-// Re-export the error type for consistency
-pub use crate::fused_attention_kernels::fused_attention::AttentionError as FusedAttentionError;
+// Re-export error types
+pub use sparsity_manager::SparsityError;
+pub use memory_layout::MemoryLayoutError;
+pub use distiller::DistillerError;
 
-use candle_core::{Tensor, DType, Device};
 use thiserror::Error;
 
 /// Error type for attention operations
 #[derive(Error, Debug)]
 pub enum AttentionError {
-    #[error("Candle error: {0}")]
-    CandleError(#[from] candle_core::Error),
-    
+    #[error("Attention error: {0}")]
+    Generic(String),
     #[error("Failed to update KV cache")]
     KVCacheUpdate,
-    
     #[error("Invalid input dimensions")]
-    InvalidInput,
-    
-    #[error("Shape mismatch in attention")]
+    InvalidInputDims,
+    #[error("Shape mismatch")]
     ShapeMismatch,
-    
     #[error("Invalid input length")]
     InvalidInputLength,
     
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
-}
-
-impl From<FusedAttentionError> for AttentionError {
-    fn from(err: FusedAttentionError) -> Self {
-        match err {
-            FusedAttentionError::ShapeMismatch => AttentionError::ShapeMismatch,
-            FusedAttentionError::InvalidInput => AttentionError::InvalidInputLength,
-            FusedAttentionError::CandleError(e) => AttentionError::CandleError(e),
-            FusedAttentionError::Anyhow(e) => AttentionError::Anyhow(e),
-        }
-    }
 }

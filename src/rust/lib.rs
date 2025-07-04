@@ -1,11 +1,15 @@
 // lib.rs
 
-//! Fandango is a simple library for demonstration purposes.
-//! It provides basic functionality for managing models and scheduling tasks.
+//! Fandango is a high-performance library for efficient transformer inference.
+//! It provides optimized attention mechanisms and memory management for large language models.
 //! This file is part of the Zeta Reticula - Fandango project, which is licensed under the Apache License 2.0.
 
 use candle_core::{Result, DType, Device, Tensor, Error};
 use thiserror::Error;
+
+// Re-export commonly used types
+pub use candle_core;
+pub use candle_nn;
 
 #[derive(Error, Debug)]
 pub enum FandangoError {
@@ -19,10 +23,21 @@ pub enum FandangoError {
     CandleError(#[from] candle_core::Error),
 }
 
+// Core modules
 pub mod fused_attention_kernels;
 pub mod kvcache_manager;
 pub mod runtime_scheduler;
 pub mod utils;
+pub mod storage_engine;
+pub mod cognitive_modeling;
+
+// Re-export important types
+pub use storage_engine::{SelfDesigningEngine, LearnedStructure, DesignSpace, CosineIntegration};
+pub use cognitive_modeling::{CognitiveModel, MCMCSearch};
+pub use fused_attention_kernels::{
+    FusedAttention, SparsityManager, NeuralPredictor, Distiller, FFNMemoryLayout, SpeculativeDecoder,
+    SparsityError, MemoryLayoutError, DistillerError, AttentionError
+};
 
 #[cfg(feature = "quantized_model_loader")]
 pub mod quantized_model_loader;

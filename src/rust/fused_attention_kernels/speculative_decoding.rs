@@ -1,10 +1,10 @@
-use candle_core::{Tensor, Device, Result, DType};
 use std::collections::VecDeque;
 use std::fmt;
-use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, SparsityError};
+use candle_core::{Tensor, DType, Device};
+use candle_core::error::Result as CandleResult;
+use crate::fused_attention_kernels::sparsity_manager::SparsityManager;
+use crate::fused_attention_kernels::distiller::monitoring;
 use crate::fused_attention_kernels::memory_management::MemoryManager;
-use crate::monitoring;
-use anyhow::Context;
 
 pub struct SpeculativeDecoder {
     sparsity_mgr: SparsityManager,
@@ -28,7 +28,7 @@ impl fmt::Debug for SpeculativeDecoder {
 }
 
 impl SpeculativeDecoder {
-    pub fn new(device: Device, draft_lambda: usize, window_size_k: usize, acceptance_ratio: f32) -> Result<Self> {
+    pub fn new(device: Device, draft_lambda: usize, window_size_k: usize, acceptance_ratio: f32) -> CandleResult<Self> {
         let sparsity_mgr = SparsityManager::new(device.clone(), 3, 10)
             .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
             
@@ -46,7 +46,7 @@ impl SpeculativeDecoder {
         })
     }
 
-    pub fn decode(&mut self, input_tokens: &Tensor) -> Result<Tensor> {
+    pub fn decode(&mut self, input_tokens: &Tensor) -> CandleResult<Tensor> {
         let start = std::time::Instant::now();
         let mut verified_tokens = Vec::new();
 
@@ -92,21 +92,21 @@ impl SpeculativeDecoder {
         Ok(output)
     }
 
-    fn generate_draft_tokens(&self, _input: &Tensor, lambda: usize) -> Result<Tensor> {
+    fn generate_draft_tokens(&self, _input: &Tensor, lambda: usize) -> CandleResult<Tensor> {
         // For now, generate random tokens as placeholders
         // In a real implementation, this would use the draft model
         Tensor::rand(0.0, 1.0, (lambda,), &self.device)
     }
 
-    fn verify_token(&self, token: &Tensor) -> Result<bool> {
+    fn verify_token(&self, token: &Tensor) -> CandleResult<bool> {
         // Simple verification: check if the token's mean value is above threshold
         let mean = token.mean_all()?.to_scalar::<f32>()?;
         let result = mean > 0.5;
         
         if result {
-            monitoring::record_speculative_accepted();
+            monitoring::record_latency(1.0); // Record successful verification
         } else {
-            monitoring::record_speculative_rejected();
+            monitoring::record_latency(0.0); // Record failed verification
         }
         
         Ok(result)

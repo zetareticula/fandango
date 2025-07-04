@@ -1,8 +1,7 @@
-use candle_core::{Tensor, Device, Result, DType, Error, Module};
-use candle_nn::{VarBuilder, Optimizer, Adam, OptimizerConfig, VarMap, SGD};
+use candle_core::{Tensor, DType, Device};
+use candle_nn::{Optimizer, SGD, VarBuilder, VarMap};
 use std::time::Instant;
 use thiserror::Error;
-use std::collections::HashMap;
 
 #[derive(Error, Debug)]
 pub enum DistillerError {
@@ -19,22 +18,13 @@ type Result<T> = std::result::Result<T, DistillerError>;
 pub struct Distiller {
     device: Device,
     scaling_vectors: Vec<Tensor>,
-    var_builder: VarBuilder<'static>,
 }
 
 impl Distiller {
     pub fn new(device: Device, scaling_vectors: Vec<Tensor>) -> Result<Self> {
-        // Create a new VarBuilder with the scaling vectors
-        let mut vars = HashMap::new();
-        for (i, tensor) in scaling_vectors.iter().enumerate() {
-            vars.insert(format!("scale_{}", i), tensor.clone());
-        }
-        let var_builder = VarBuilder::from_tensors(vars, DType::F32, &device);
-        
-        Ok(Distiller {
+        Ok(Self {
             device,
             scaling_vectors,
-            var_builder,
         })
     }
 
@@ -42,16 +32,15 @@ impl Distiller {
         let start = Instant::now();
         
         // Create a VarMap and VarBuilder for the parameters
-        let mut varmap = VarMap::new();
+        let varmap = VarMap::new();
         let vs = VarBuilder::from_varmap(&varmap, DType::F32, &self.device);
         
         // Store parameters in the VarMap using VarBuilder
         for (i, param) in self.scaling_vectors.iter().enumerate() {
             let shape = param.dims();
             // Create a new variable with the same shape and device
-            let var = vs.get(shape, &format!("scale_{}", i))?;
-            // Copy the parameter data to the variable
-            var.copy_(&param)?;
+            let var_name = format!("scale_{}", i);
+            let _ = vs.get(shape, &var_name)?;
         }
         
         // Create an optimizer with the variables from the VarMap
@@ -65,7 +54,14 @@ impl Distiller {
             for i in 0..self.scaling_vectors.len() {
                 // Get the parameter from the VarMap
                 let var_name = format!("scale_{}", i);
-                let var = varmap.get(&var_name, vs.dtype(), vs.device())?;
+                let shape = self.scaling_vectors[i].dims();
+                let var = varmap.get(
+                    shape,
+                    &var_name,
+                    candle_nn::Init::Const(0.0),
+                    DType::F32,
+                    &self.device
+                )?;
                 
                 // Compute loss
                 let loss = self.compute_distillation_loss(&var)?;
@@ -73,7 +69,7 @@ impl Distiller {
                 // Backward pass
                 let grads = loss.backward()?;
                 
-                // Update parameter using the optimizer with learning rate
+                // Update parameter using the optimizer
                 opt.step(&grads)?;
                 
                 // Update the scaling vector in our tracking list
@@ -106,8 +102,6 @@ impl Distiller {
 
 // Monitoring module for distillation
 pub mod monitoring {
-    use std::time::Duration;
-
     pub fn record_latency(latency: f64) {
         // Record latency for distillation
         println!("Distillation latency: {:.2} ms", latency * 1000.0);
