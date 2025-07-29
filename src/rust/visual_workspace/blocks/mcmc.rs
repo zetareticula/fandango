@@ -63,7 +63,6 @@ impl MCMCBlock {
     }
 }
 
-#[async_trait::async_trait]
 impl OptimizationBlock for MCMCBlock {
     fn block_type(&self) -> &'static str {
         "mcmc_optimizer"
@@ -97,72 +96,81 @@ impl OptimizationBlock for MCMCBlock {
         ]
     }
     
-    async fn process(&mut self, inputs: BlockInputs) -> Result<BlockOutputs> {
-        // Get input parameters
-        let initial_params = inputs.values.get("initial_parameters")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'initial_parameters' input".to_string()))?;
+    fn process<'a>(
+        &'a mut self,
+        inputs: BlockInputs,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BlockOutputs>> + Send + 'a>> {
+        // Clone the fields we need for the async block
+        let iterations = self.iterations;
+        let temperature = self.temperature;
+        let current_iteration = Arc::clone(&self.current_iteration);
+        let best_solution = Arc::clone(&self.best_solution);
+        let metrics = Arc::clone(&self.metrics);
+        
+        Box::pin(async move {
+            // Get input parameters
+            let initial_params = inputs.values.get("initial_parameters")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'initial_parameters' input".to_string()))?;
+                
+            let objective = inputs.values.get("objective_function")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'objective_function' input".to_string()))?;
             
-        let objective = inputs.values.get("objective_function")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'objective_function' input".to_string()))?;
-        
-        // Initialize MCMC
-        let mut model = CognitiveModel::new();
-        // TODO: Initialize model with parameters from initial_params
-        
-        let mut mcmc = MCMCSearch::new(model);
-        
-        // Reset state
-        *self.current_iteration.lock().unwrap() = 0;
-        *self.best_solution.lock().unwrap() = None;
-        self.metrics.lock().unwrap().clear();
-        
-        // Run MCMC
-        let mut best_score = f64::NEG_INFINITY;
-        let mut best_solution = None;
-        
-        for i in 0..self.iterations {
-            *self.current_iteration.lock().unwrap() = i;
+            // Initialize MCMC
+            let mut model = CognitiveModel::new();
+            // TODO: Initialize model with parameters from initial_params
             
-            // Run one iteration of MCMC
-            mcmc.search(1);
+            let mut mcmc = MCMCSearch::new(model);
             
-            // TODO: Extract score and parameters from the model
-            let current_score = 0.0; // Placeholder
-            let current_solution = serde_json::json!({}); // Placeholder
+            // Reset state
+            *current_iteration.lock().unwrap() = 0;
+            *best_solution.lock().unwrap() = None;
+            metrics.lock().unwrap().clear();
             
-            // Update best solution
-            if current_score > best_score {
-                best_score = current_score;
-                best_solution = Some(current_solution.clone());
-                *self.best_solution.lock().unwrap() = Some(current_solution);
+            // Run MCMC
+            let mut best_score = f64::NEG_INFINITY;
+            let mut best_sol = None;
+            
+            for i in 0..iterations {
+                *current_iteration.lock().unwrap() = i;
+                
+                // Run one iteration of MCMC
+                mcmc.search(1);
+                
+                // TODO: Extract score and parameters from the model
+                let current_score = 0.0; // Placeholder
+                let current_solution = serde_json::json!({}); // Placeholder
+                
+                // Update best solution
+                if current_score > best_score {
+                    best_score = current_score;
+                    best_sol = Some(current_solution.clone());
+                    *best_solution.lock().unwrap() = Some(current_solution);
+                }
+                
+                // Record metrics
+                let metrics_data = serde_json::json!({
+                    "iteration": i,
+                    "score": current_score,
+                    "temperature": temperature,
+                    "accepted": true, // TODO: Track acceptance rate
+                });
+                
+                metrics.lock().unwrap().push(metrics_data);
+                
+                // Yield control to allow for UI updates
+                tokio::task::yield_now().await;
             }
             
-            // Record metrics
-            let metrics = serde_json::json!({
-                "iteration": i,
-                "score": current_score,
-                "temperature": self.temperature,
-                "accepted": true, // TODO: Track acceptance rate
-            });
+            // Prepare outputs
+            let mut outputs = BlockOutputs::default();
+            outputs.values.insert("optimized_parameters".to_string(), 
+                best_sol.unwrap_or_else(|| serde_json::json!({})));
+            outputs.values.insert("best_score".to_string(), serde_json::json!(best_score));
+            outputs.values.insert("iteration_metrics".to_string(), 
+                serde_json::json!(metrics.lock().unwrap().clone()));
             
-            self.metrics.lock().unwrap().push(metrics);
-            
-            // TODO: Adjust temperature (simulated annealing)
-            self.temperature *= 0.99;
-            
-            // Yield control to allow for UI updates
-            tokio::task::yield_now().await;
-        }
-        
-        // Prepare outputs
-        let mut outputs = BlockOutputs::default();
-        outputs.values.insert("optimized_parameters".to_string(), 
-            best_solution.unwrap_or_else(|| serde_json::json!({})));
-        outputs.values.insert("best_score".to_string(), serde_json::json!(best_score));
-        outputs.values.insert("iteration_metrics".to_string(), 
-            serde_json::json!(self.metrics.lock().unwrap().clone()));
-        
-        Ok(outputs)
+            Ok(outputs)
+        })
     }
     
     fn clone_box(&self) -> Box<dyn OptimizationBlock> {
@@ -174,6 +182,14 @@ impl OptimizationBlock for MCMCBlock {
             best_solution: Arc::clone(&self.best_solution),
             metrics: Arc::clone(&self.metrics),
         })
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 

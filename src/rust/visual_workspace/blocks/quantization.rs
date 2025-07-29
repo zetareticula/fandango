@@ -1,7 +1,41 @@
 //! Quantization block implementation
 
 use serde::{Serialize, Deserialize};
+use ndarray::{ArrayD, ArrayViewD, Array};
+use num_traits::Float;
 use super::*;
+
+// Helper function to calculate the scale and zero point for quantization
+fn calculate_scale_zero_point<T: Float>(
+    min: T,
+    max: T,
+    qmin: i32,
+    qmax: i32,
+) -> (T, T) {
+    let scale = (max - min) / T::from(qmax - qmin).unwrap();
+    let zero_point = T::from(qmin).unwrap() - (min / scale).round();
+    (scale, zero_point)
+}
+
+// Helper function to quantize a single value
+fn quantize_value<T: Float>(
+    value: T,
+    scale: T,
+    zero_point: T,
+    qmin: i32,
+    qmax: i32,
+) -> i32 {
+    let q = (value / scale + zero_point).round();
+    q.max(T::from(qmin).unwrap())
+        .min(T::from(qmax).unwrap())
+        .to_i32()
+        .unwrap()
+}
+
+// Helper function to dequantize a single value
+fn dequantize_value<T: Float>(q: i32, scale: T, zero_point: T) -> T {
+    scale * (T::from(q).unwrap() - zero_point)
+}
 
 /// A block that applies quantization to model weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +68,6 @@ impl QuantizationBlock {
     }
 }
 
-#[async_trait::async_trait]
 impl OptimizationBlock for QuantizationBlock {
     fn block_type(&self) -> &'static str {
         "quantization"
@@ -68,26 +101,115 @@ impl OptimizationBlock for QuantizationBlock {
         ]
     }
     
-    async fn process(&mut self, inputs: BlockInputs) -> Result<BlockOutputs> {
-        // Get input tensors
-        let weights = inputs.values.get("weights")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'weights' input".to_string()))?;
+    fn process<'a>(
+        &'a mut self,
+        inputs: BlockInputs,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BlockOutputs>> + Send + 'a>> {
+        // Clone the fields we need for the async block
+        let bits = self.bits;
+        let group_size = self.group_size;
+        let symmetric = self.symmetric;
+        
+        Box::pin(async move {
+            // Get input tensors
+            let weights_json = inputs.values.get("weights")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'weights' input".to_string()))?;
             
-        // TODO: Implement actual quantization logic
-        // This is a placeholder that just passes through the weights
-        let mut outputs = BlockOutputs::default();
-        outputs.values.insert("quantized_weights".to_string(), weights.clone());
-        outputs.values.insert("scale".to_string(), serde_json::json!(1.0));
-        
-        if !self.symmetric {
-            outputs.values.insert("zero_point".to_string(), serde_json::json!(0.0));
-        }
-        
-        Ok(outputs)
+            // Convert JSON to ndarray
+            let weights: Vec<f32> = serde_json::from_value(weights_json.clone())
+                .map_err(|e| WorkspaceError::BlockError(format!("Invalid weights format: {}", e)))?;
+            
+            let len = weights.len();
+            let num_groups = (len + group_size - 1) / group_size;
+            
+            // Calculate quantization parameters
+            let qmin = 0;
+            let qmax = (1 << bits) - 1;
+            
+            let mut quantized_weights = Vec::with_capacity(len);
+            let mut scales = Vec::with_capacity(num_groups);
+            let mut zero_points = if symmetric { None } else { Some(Vec::with_capacity(num_groups)) };
+            
+            // Process each group
+            for group_idx in 0..num_groups {
+                let start = group_idx * group_size;
+                let end = (start + group_size).min(len);
+                let group = &weights[start..end];
+                
+                // Find min and max in the group
+                let min = *group.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(&0.0);
+                let max = *group.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(&0.0);
+                
+                // Calculate scale and zero point
+                let (scale, zero_point) = if symmetric {
+                    let max_val = max.abs().max(min.abs());
+                    (max_val / (qmax as f32), 0.0)
+                } else {
+                    calculate_scale_zero_point(min, max, qmin, qmax)
+                };
+                
+                // Quantize the group
+                for &value in group {
+                    let q = quantize_value(value, scale, zero_point, qmin, qmax);
+                    quantized_weights.push(q);
+                }
+                
+                scales.push(scale);
+                if let Some(ref mut zps) = zero_points {
+                    zps.push(zero_point);
+                }
+            }
+            
+            // Prepare outputs
+            let mut outputs = BlockOutputs::default();
+            outputs.values.insert("quantized_weights".to_string(), serde_json::json!(quantized_weights));
+            outputs.values.insert("scale".to_string(), serde_json::json!(scales));
+            
+            // Handle zero points and metrics
+            if !symmetric {
+                let zero_points = zero_points.unwrap();
+                let compressed_size = (len * bits as usize / 8) + 
+                    (scales.len() * std::mem::size_of::<f32>()) +
+                    (zero_points.len() * std::mem::size_of::<f32>());
+                let compression_ratio = (len * std::mem::size_of::<f32>()) as f64 / compressed_size as f64;
+                
+                outputs.values.insert("zero_point".to_string(), serde_json::json!(zero_points));
+                
+                // Add quantization metrics
+                outputs.values.insert("quantization_metrics".to_string(), serde_json::json!({
+                    "bits": bits,
+                    "original_size_bytes": len * std::mem::size_of::<f32>(),
+                    "compressed_size_bytes": compressed_size,
+                    "compression_ratio": compression_ratio,
+                }));
+            } else {
+                let compressed_size = (len * bits as usize / 8) + 
+                    (scales.len() * std::mem::size_of::<f32>());
+                let compression_ratio = (len * std::mem::size_of::<f32>()) as f64 / compressed_size as f64;
+                
+                // Add quantization metrics for symmetric case
+                outputs.values.insert("quantization_metrics".to_string(), serde_json::json!({
+                    "bits": bits,
+                    "original_size_bytes": len * std::mem::size_of::<f32>(),
+                    "compressed_size_bytes": compressed_size,
+                    "compression_ratio": compression_ratio,
+                }));
+            }
+            
+            Ok(outputs)
+        })
     }
     
     fn clone_box(&self) -> Box<dyn OptimizationBlock> {
         Box::new(self.clone())
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 

@@ -40,7 +40,6 @@ impl KVCacheOptimizer {
     }
 }
 
-#[async_trait::async_trait]
 impl OptimizationBlock for KVCacheOptimizer {
     fn block_type(&self) -> &'static str {
         "kv_cache_optimizer"
@@ -74,31 +73,47 @@ impl OptimizationBlock for KVCacheOptimizer {
         ]
     }
     
-    async fn process(&mut self, inputs: BlockInputs) -> Result<BlockOutputs> {
-        // Get input tensors
-        let _key_cache = inputs.values.get("key_cache")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'key_cache' input".to_string()))?;
-        let _value_cache = inputs.values.get("value_cache")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'value_cache' input".to_string()));
+    fn process<'a>(
+        &'a mut self,
+        inputs: BlockInputs,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BlockOutputs>> + Send + 'a>> {
+        // Clone the fields we need for the async block
+        let compression_ratio = self.compression_ratio;
         
-        // TODO: Implement actual KV cache optimization logic
-        // This is a placeholder that just passes through the caches
-        let mut outputs = BlockOutputs::default();
-        outputs.values.insert("optimized_key_cache".to_string(), _key_cache.clone());
-        outputs.values.insert("optimized_value_cache".to_string(), _key_cache.clone());
-        
-        outputs.values.insert("cache_metrics".to_string(), serde_json::json!({
-            "original_size": 0,
-            "compressed_size": 0,
-            "compression_ratio": self.compression_ratio,
-            "evicted_tokens": 0,
-        }));
-        
-        Ok(outputs)
+        Box::pin(async move {
+            // Get input tensors
+            let _key_cache = inputs.values.get("key_cache")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'key_cache' input".to_string()))?;
+            let _value_cache = inputs.values.get("value_cache")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'value_cache' input".to_string()));
+            
+            // TODO: Implement actual KV cache optimization logic
+            // This is a placeholder that just passes through the caches
+            let mut outputs = BlockOutputs::default();
+            outputs.values.insert("optimized_key_cache".to_string(), _key_cache.clone());
+            outputs.values.insert("optimized_value_cache".to_string(), _key_cache.clone());
+            
+            outputs.values.insert("cache_metrics".to_string(), serde_json::json!({
+                "original_size": 0,
+                "compressed_size": 0,
+                "compression_ratio": compression_ratio,
+                "evicted_tokens": 0,
+            }));
+            
+            Ok(outputs)
+        })
     }
     
     fn clone_box(&self) -> Box<dyn OptimizationBlock> {
         Box::new(self.clone())
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 

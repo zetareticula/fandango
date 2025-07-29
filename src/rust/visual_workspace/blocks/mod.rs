@@ -39,8 +39,10 @@ use crate::utils::Timer;
 use crate::storage_engine::SelfDesigningEngine;
 use crate::cognitive_modeling::MCMCSearch;
 
+use std::future::Future;
+use std::pin::Pin;
+
 /// Trait that all optimization blocks must implement
-#[async_trait::async_trait]
 pub trait OptimizationBlock: Send + Sync + std::fmt::Debug {
     /// Unique identifier for this block type
     fn block_type(&self) -> &'static str;
@@ -61,10 +63,19 @@ pub trait OptimizationBlock: Send + Sync + std::fmt::Debug {
     fn outputs(&self) -> Vec<(&'static str, &'static str)>;
     
     /// Process the input data and return the output
-    async fn process(&mut self, inputs: BlockInputs) -> Result<BlockOutputs>;
+    fn process<'a>(
+        &'a mut self,
+        inputs: BlockInputs,
+    ) -> Pin<Box<dyn Future<Output = Result<BlockOutputs>> + Send + 'a>>;
     
     /// Clone the block (for duplication)
     fn clone_box(&self) -> Box<dyn OptimizationBlock>;
+    
+    /// Get a reference to the block as Any
+    fn as_any(&self) -> &dyn std::any::Any;
+    
+    /// Get a mutable reference to the block as Any
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Input values for a block
@@ -80,7 +91,7 @@ pub struct BlockOutputs {
 }
 
 /// A block instance in the workspace
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BlockInstance {
     pub id: BlockId,
     pub block_type: String,
@@ -89,6 +100,19 @@ pub struct BlockInstance {
     pub data: serde_json::Value,
     #[serde(skip)]
     block: Option<Box<dyn OptimizationBlock>>,
+}
+
+impl Clone for BlockInstance {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            block_type: self.block_type.clone(),
+            position: self.position.clone(),
+            size: self.size.clone(),
+            data: self.data.clone(),
+            block: self.block.as_ref().map(|b| b.clone_box()),
+        }
+    }
 }
 
 impl BlockInstance {
@@ -109,6 +133,21 @@ impl BlockInstance {
         self.block.as_deref().ok_or_else(|| 
             WorkspaceError::BlockError("Block not initialized".to_string())
         )
+    }
+    
+    /// Get a mutable reference to the underlying block as Any
+    pub fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        // If we have a block, return its Any, otherwise return self
+        // We need to handle the Option properly to avoid multiple mutable borrows
+        match self.block {
+            Some(ref mut block) => block.as_any_mut(),
+            None => self,
+        }
+    }
+    
+    /// Get a reference to the block as Any
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        self.block.as_ref().map(|b| b.as_any()).unwrap_or(self)
     }
     
     /// Get a mutable reference to the underlying block

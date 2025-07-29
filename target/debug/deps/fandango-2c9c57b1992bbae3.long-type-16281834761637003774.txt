@@ -1,0 +1,3 @@
+dyn blocks::OptimizationBlock: Clone
+Box<dyn blocks::OptimizationBlock>
+std::option::Option<Box<dyn blocks::OptimizationBlock>>

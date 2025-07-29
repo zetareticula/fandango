@@ -3,13 +3,40 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 use super::{
     BlockId, Position, Result, Size, WorkspaceError,
     blocks::{BlockInstance, BlockLibrary, Debuggable, DebuggableBlock},
     state::{WorkspaceState, Connection},
     pipeline::OptimizationPipeline,
 };
+
+/// Represents the execution status of the workspace
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExecutionStatus {
+    /// No execution is currently running
+    Idle,
+    
+    /// Execution is currently running
+    Running,
+    
+    /// Execution is paused
+    Paused,
+}
+
+/// Represents the current execution state of the workspace
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionState {
+    /// Current execution status
+    pub status: ExecutionStatus,
+    
+    /// Current progress (0.0 to 1.0)
+    pub progress: f32,
+    
+    /// Additional execution metrics
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<serde_json::Value>,
+}
 
 /// The main visual workspace
 pub struct VisualWorkspace {
@@ -367,7 +394,7 @@ impl VisualWorkspace {
         ExecutionState {
             status: self.execution_status(),
             progress: self.progress(),
-            // Add more state information as needed
+            metrics: None, // We can add metrics collection here if needed
         }
     }
     

@@ -40,7 +40,6 @@ impl SparseAttentionBlock {
     }
 }
 
-#[async_trait::async_trait]
 impl OptimizationBlock for SparseAttentionBlock {
     fn block_type(&self) -> &'static str {
         "sparse_attention"
@@ -74,26 +73,39 @@ impl OptimizationBlock for SparseAttentionBlock {
         ]
     }
     
-    async fn process(&mut self, inputs: BlockInputs) -> Result<BlockOutputs> {
-        // Get input tensors
-        let _query = inputs.values.get("query")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'query' input".to_string()))?;
-        let _key = inputs.values.get("key")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'key' input".to_string()))?;
-        let _value = inputs.values.get("value")
-            .ok_or_else(|| WorkspaceError::BlockError("Missing 'value' input".to_string()))?;
-        
-        // TODO: Implement actual sparse attention logic
-        // This is a placeholder that just returns the input values
-        let mut outputs = BlockOutputs::default();
-        outputs.values.insert("output".to_string(), _value.clone());
-        outputs.values.insert("attention_weights".to_string(), serde_json::json!([]));
-        
-        Ok(outputs)
+    fn process<'a>(
+        &'a mut self,
+        inputs: BlockInputs,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BlockOutputs>> + Send + 'a>> {
+        Box::pin(async move {
+            // Get input tensors
+            let _query = inputs.values.get("query")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'query' input".to_string()))?;
+            let _key = inputs.values.get("key")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'key' input".to_string()))?;
+            let _value = inputs.values.get("value")
+                .ok_or_else(|| WorkspaceError::BlockError("Missing 'value' input".to_string()))?;
+            
+            // TODO: Implement actual sparse attention logic
+            // This is a placeholder that just returns the input values
+            let mut outputs = BlockOutputs::default();
+            outputs.values.insert("output".to_string(), _value.clone());
+            outputs.values.insert("attention_weights".to_string(), serde_json::json!([]));
+            
+            Ok(outputs)
+        })
     }
     
     fn clone_box(&self) -> Box<dyn OptimizationBlock> {
         Box::new(self.clone())
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 
