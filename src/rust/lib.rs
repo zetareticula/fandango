@@ -1,11 +1,13 @@
 // lib.rs
 
 //! Fandango is a high-performance library for efficient transformer inference.
-//! It provides optimized attention mechanisms and memory management for large language models.
-//! This file is part of the Zeta Reticula - Fandango project, which is licensed under the Apache License 2.0.
+//! It provides optimized attention mechanisms, memory management, and a visual workspace
+//! for large language models. This file is part of the Zeta Reticula - Fandango project,
+//! which is licensed under the Apache License 2.0.
 
 use candle_core::{Result, DType, Device, Tensor, Error};
 use thiserror::Error;
+use serde::{Serialize, Deserialize};
 
 // Re-export commonly used types
 pub use candle_core;
@@ -30,6 +32,7 @@ pub mod runtime_scheduler;
 pub mod utils;
 pub mod storage_engine;
 pub mod cognitive_modeling;
+pub mod visual_workspace;
 
 // Re-export important types
 pub use storage_engine::{SelfDesigningEngine, LearnedStructure, DesignSpace, CosineIntegration};
