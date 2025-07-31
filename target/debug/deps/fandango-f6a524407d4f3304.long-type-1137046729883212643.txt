@@ -1,1 +1,0 @@
-Shape: From<&std::string::String>

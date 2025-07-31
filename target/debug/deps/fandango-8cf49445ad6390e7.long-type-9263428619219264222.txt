@@ -1,1 +1,0 @@
-ArrayBase<OwnedRepr<Vec<f32>>, ndarray::Dim<[usize; 2]>>
