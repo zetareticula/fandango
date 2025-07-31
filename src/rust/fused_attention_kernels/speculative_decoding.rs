@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt;
+use anyhow::Context;
 use candle_core::{Tensor, DType, Device};
 use candle_core::error::Result as CandleResult;
 use crate::fused_attention_kernels::sparsity_manager::SparsityManager;
@@ -33,7 +34,7 @@ impl SpeculativeDecoder {
             .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
             
         let memory_mgr = MemoryManager::new(device.clone())
-            .context("Failed to initialize memory manager")?;
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to initialize memory manager: {}", e)))?;
             
         Ok(SpeculativeDecoder {
             sparsity_mgr,

@@ -28,7 +28,9 @@ impl MemoryManager {
     /// Adjusts the DRAM usage percentage and returns the parameters in DRAM.
     pub fn adjust_dram_usage(&mut self, percentage: f32) -> CandleResult<Tensor> {
         self.dram_percentage = percentage.clamp(0.0, 1.0);
-        let dram_size = (self.opt_67b_params.num_elements()? as f32 * self.dram_percentage) as usize;
+        let shape = self.opt_67b_params.dims();
+        let total_elements: usize = shape.iter().product();
+        let dram_size = (total_elements as f32 * self.dram_percentage) as usize;
         let dram_params = self.opt_67b_params.narrow(0, 0, dram_size)?;
         let start = std::time::Instant::now();
         let output = dram_params.clone(); // Simulate usage
