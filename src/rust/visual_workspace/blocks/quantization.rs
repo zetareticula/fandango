@@ -216,7 +216,61 @@ impl OptimizationBlock for QuantizationBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_quantization_block_symmetric() {
+        // Create a quantization block with 4-bit symmetric quantization
+        let mut block = QuantizationBlock::new(4).with_group_size(4);
+        
+        // Create test input weights
+        let mut inputs = BlockInputs::default();
+        let test_weights = vec![1.0, 2.0, 3.0, 4.0, -1.0, -2.0, -3.0, -4.0];
+        inputs.values.insert("weights".to_string(), json!(test_weights));
+        
+        // Process the inputs
+        let result = block.process(inputs).await.unwrap();
+        
+        // Verify the outputs
+        assert!(result.values.contains_key("quantized_weights"));
+        assert!(result.values.contains_key("scale"));
+        assert!(!result.values.contains_key("zero_point"), "Should not have zero_point in symmetric mode");
+        
+        // Verify metrics
+        assert!(result.values.contains_key("quantization_metrics"));
+        let metrics = result.values.get("quantization_metrics").unwrap();
+        assert_eq!(metrics["bits"], 4);
+        assert!(metrics["compression_ratio"].as_f64().unwrap() > 1.0, "Compression ratio should be greater than 1.0");
+    }
+
+    #[tokio::test]
+    async fn test_quantization_block_asymmetric() {
+        // Create a quantization block with 4-bit asymmetric quantization
+        let mut block = QuantizationBlock::new(4)
+            .with_group_size(4)
+            .with_symmetric(false);
+        
+        // Create test input weights
+        let mut inputs = BlockInputs::default();
+        let test_weights = vec![1.0, 2.0, 3.0, 4.0, -1.0, -2.0, -3.0, -4.0];
+        inputs.values.insert("weights".to_string(), json!(test_weights));
+        
+        // Process the inputs
+        let result = block.process(inputs).await.unwrap();
+        
+        // Verify the outputs
+        assert!(result.values.contains_key("quantized_weights"));
+        assert!(result.values.contains_key("scale"));
+        assert!(result.values.contains_key("zero_point"), "Should have zero_point in asymmetric mode");
+        
+        // Verify metrics
+        assert!(result.values.contains_key("quantization_metrics"));
+        let metrics = result.values.get("quantization_metrics").unwrap();
+        assert_eq!(metrics["bits"], 4);
+        assert!(metrics["compression_ratio"].as_f64().unwrap() > 1.0, "Compression ratio should be greater than 1.0");
+    }
+
     #[tokio::test]
     async fn test_quantization_block() {
         let mut block = QuantizationBlock::new(4);
