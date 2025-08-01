@@ -42,7 +42,7 @@ impl RuntimeScheduler {
         let prefetch_handle = tokio::spawn(prefetch_mgr.run());
         
         let cognitive_model = CognitiveModel::new();
-        let mcmc_search = MCMCSearch::new();
+        let mcmc_search = MCMCSearch::new(cognitive_model.clone());
         
         RuntimeScheduler {
             kv_cache_mgr,

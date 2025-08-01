@@ -7,6 +7,9 @@ use std::iter::FromIterator;
 use bloomfilter::Bloom;
 use fxhash;
 use std::fmt;
+use std::sync::Arc;
+
+#[derive(Clone)]
 
 /// CognitiveModel represents a cognitive model that uses Bayesian inference
 /// to update its theory space based on observations and likelihoods.
@@ -38,16 +41,22 @@ impl CognitiveModel {
     }
 
     pub fn update_theory_space(&mut self) {
-        let mut total_prob = 0.0;
-        for (theory_id, _) in self.theory_space.iter_mut() {
-            let likelihood = self.compute_likelihood(theory_id);
-            let posterior = self.prior * likelihood;
-            *self.theory_space.get_mut(theory_id).unwrap() = posterior;
-            total_prob += posterior;
-        }
-        // Normalize probabilities
-        for (_, prob) in self.theory_space.iter_mut() {
-            *prob /= total_prob;
+        // First, compute all posteriors
+        let mut posteriors: Vec<(String, f64)> = self.theory_space
+            .iter()
+            .map(|(theory_id, _)| {
+                let likelihood = self.compute_likelihood(theory_id);
+                (theory_id.clone(), self.prior * likelihood)
+            })
+            .collect();
+            
+        // Calculate total probability
+        let total_prob: f64 = posteriors.iter().map(|(_, p)| p).sum();
+        
+        // Update theory space with normalized probabilities
+        self.theory_space.clear();
+        for (theory_id, posterior) in posteriors {
+            self.theory_space.insert(theory_id, posterior / total_prob);
         }
     }
 
@@ -71,7 +80,7 @@ impl CognitiveModel {
 /// /// The search iteratively proposes new theories, computes their likelihoods,
 /// /// and accepts or rejects them based on an acceptance ratio.
 pub struct MCMCSearch {
-    model: CognitiveModel,
+    pub model: Arc<Mutex<CognitiveModel>>,
     temperature: f64,
     step_size: f64,
 }
@@ -79,7 +88,7 @@ pub struct MCMCSearch {
 impl MCMCSearch {
     pub fn new(model: CognitiveModel) -> Self {
         MCMCSearch {
-            model,
+            model: Arc::new(Mutex::new(model)),
             temperature: 1.0, // Initial temperature for simulated annealing
             step_size: 0.1,
         }
@@ -88,26 +97,28 @@ impl MCMCSearch {
     pub fn search(&mut self, iterations: usize) {
         let mut rng = rand::thread_rng();
         let mut current_theory = String::from("initial_theory");
-        self.model.theory_space.insert(current_theory.clone(), 1.0);
+        
+        // Lock the model for the duration of the search
+        let mut model = self.model.lock().unwrap();
+        model.theory_space.insert(current_theory.clone(), 1.0);
 
         for _ in 0..iterations {
-            let new_theory = self.propose_new_theory(&current_theory);
-            let current_likelihood = self.model.compute_likelihood(&current_theory);
-            let new_likelihood = self.model.compute_likelihood(&new_theory);
+            let new_theory = self.propose_new_theory(&current_theory, &mut rng);
+            let current_likelihood = model.compute_likelihood(&current_theory);
+            let new_likelihood = model.compute_likelihood(&new_theory);
 
             let acceptance_ratio = (new_likelihood / current_likelihood).exp() / self.temperature;
             if rng.gen::<f64>() < acceptance_ratio.min(1.0) {
                 current_theory = new_theory;
-                self.model.theory_space.insert(current_theory.clone(), new_likelihood);
+                model.theory_space.insert(current_theory.clone(), new_likelihood);
             }
 
-            self.model.update_theory_space();
+            model.update_theory_space();
             self.temperature *= 0.99; // Cool down
         }
     }
 
-    fn propose_new_theory(&self, current: &str) -> String {
-        let mut rng = rand::thread_rng();
+    fn propose_new_theory<R: rand::Rng>(&self, current: &str, rng: &mut R) -> String {
         format!("{}_variant{}", current, rng.gen_range(0..100))
     }
 }

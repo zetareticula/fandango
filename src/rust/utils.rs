@@ -1,3 +1,11 @@
+
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+
+// This file contains functions to calculate entropy and measure locality of attention data.
+// The entropy function calculates the uncertainty in the data distribution,
+// while the locality function measures how close values are to the mean of the data.
+
 //! Utility functions and helpers for the Fandango project.
 
 use candle_core::Tensor;

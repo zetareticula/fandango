@@ -412,6 +412,13 @@ impl VisualWorkspace {
             selected_blocks: Vec::new(),
             dragged_block: None,
             dragged_connection: None,
+            pipeline: None,
+            debug_info: Arc::new(Mutex::new(HashMap::new())),
+            metrics: Arc::new(Mutex::new(HashMap::new())),
+            progress: Arc::new(Mutex::new(0.0)),
+            is_running: false,
+            should_pause: false,
+            should_stop: false,
         })
     }
 }

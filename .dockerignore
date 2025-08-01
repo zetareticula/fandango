@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Web UI
+/web-ui/node_modules/
+/web-ui/dist/
+/web-ui/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# Environment variables
+.env
+*.env.local
+
+# Logs
+*.log
+
+# Local development files
+*.local
+
+# Build artifacts
+**/*.wasm
+**/*.wasm.map
+**/*.wasm.br
+**/*.js.br
+**/*.html.br
+**/*.css.br

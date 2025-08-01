@@ -1,8 +1,13 @@
 //! Memory management utilities for the fused attention kernels.
 
-use candle_core::{Tensor, Device, DType};
+use candle_core::{Tensor, Device, DType, Error as CandleError};
 use candle_core::error::Result as CandleResult;
 use crate::fused_attention_kernels::distiller::monitoring;
+
+/// Convert a string error into a CandleError
+fn err_msg<S: Into<String>>(msg: S) -> CandleError {
+    CandleError::Msg(msg.into())
+}
 
 /// Manages memory allocation and deallocation for the attention mechanism.
 pub struct MemoryManager {

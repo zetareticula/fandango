@@ -9,11 +9,23 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Web framework
-yew = { version = "0.20", features = ["csr"] }
+yew = { version = "0.20", features = ["csr", "context"] }
 yew-router = "0.17"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement", "InputEvent", "MouseEvent", "KeyboardEvent"] }
+wasm-bindgen-rayon = "1.0"
+web-sys = { version = "0.3", features = [
+    "Window", 
+    "Document", 
+    "HtmlElement", 
+    "HtmlCanvasElement", 
+    "HtmlInputElement", 
+    "InputEvent", 
+    "MouseEvent", 
+    "KeyboardEvent",
+    "Location",
+    "console"
+] }
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 log = "0.4"
@@ -29,7 +41,19 @@ yew-feather = { version = "0.10", features = ["icons"] }
 stylist = { version = "0.10", features = ["yew"] }
 
 # For async runtime
-wasm-bindgen-rayon = "1.0"
+gloo-net = { version = "0.3", features = ["websocket"] }
+gloo-utils = "0.1"
+futures = "0.3"
+futures-util = { version = "0.3", features = ["std"] }
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["wasmbind"] }
+
+# For WebSocket
+wasm-bindgen-ws = "0.1"
+wasm-logger = "0.2"
+
+# For state management
+yew-context-provider = "0.3"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

@@ -1,0 +1,21 @@
+[build]
+target = "wasm32-unknown-unknown"
+release = false
+
+[serve]
+port = 8080
+watch = ["src", "../src"]
+
+[[hooks]]
+stage = "pre-build"
+command = "cargo"
+command_arguments = ["build", "--package", "fandango-web", "--target", "wasm32-unknown-unknown"]
+
+[[hooks]]
+stage = "post-build"
+command = "wasm-opt"
+command_arguments = ["-O4", "-o", "dist/fandango_web_bg.wasm", "dist/fandango_web_bg.wasm"]
+
+[dist]
+# The directory where the final build artifacts will be placed
+public_url = "/"
