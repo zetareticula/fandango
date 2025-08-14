@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 description = "Fandango - High-performance attention mechanisms for deep learning"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Karl Whitford <whitfordsf@icloud.com.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/yourusername/fandango"
+repository = "https://github.com/zetareticula/fandango"
 keywords = ["deep-learning", "attention", "transformer", "machine-learning"]
 categories = ["machine-learning", "deep-learning"]
 
