@@ -1,7 +1,8 @@
-use candle_core::{Tensor, DType, Device};
-use candle_nn::{Optimizer, SGD, VarBuilder, VarMap};
+use candle_core::{Tensor, DType, Device, Result as CandleResult, Shape};
+use candle_nn::{Optimizer, SGD, VarBuilder, VarMap, Var, VarInit};
 use std::time::Instant;
 use thiserror::Error;
+use std::collections::HashMap;
 
 #[derive(Error, Debug)]
 pub enum DistillerError {
@@ -13,18 +14,30 @@ pub enum DistillerError {
     CandleError(#[from] candle_core::Error),
 }
 
-type Result<T> = std::result::Result<T, DistillerError>;
+/// Result type for distiller operations
+pub type Result<T, E = DistillerError> = std::result::Result<T, E>;
 
 pub struct Distiller {
     device: Device,
     scaling_vectors: Vec<Tensor>,
+    var_map: HashMap<String, Var>,
 }
 
 impl Distiller {
     pub fn new(device: Device, scaling_vectors: Vec<Tensor>) -> Result<Self> {
+        let mut var_map = HashMap::new();
+        
+        // Initialize var_map with the scaling vectors
+        for (i, tensor) in scaling_vectors.into_iter().enumerate() {
+            let var_name = format!("scale_{}", i);
+            let var = Var::from_tensor(&tensor)?;
+            var_map.insert(var_name, var);
+        }
+        
         Ok(Self {
             device,
-            scaling_vectors,
+            scaling_vectors: vec![], // We've moved the tensors into the var_map
+            var_map,
         })
     }
 
@@ -124,10 +137,11 @@ mod tests {
         
         // Verify the optimization had some effect
         let param = distiller.var_map.get("scale_0")
-            .ok_or_else(|| candle_core::Error::Msg("Parameter not found"))?;
+            .ok_or_else(|| DistillerError::ParameterError("scale_0 not found".to_string()))?;
             
         // Check that the parameter has been updated (not all ones)
-        let param_sum = param.sum_all()?.to_scalar::<f32>()?;
+        let param_tensor = param.as_tensor()?;
+        let param_sum = param_tensor.sum_all()?.to_scalar::<f32>()?;
         assert_ne!(param_sum, 10.0); // Should have changed from initial value of 1.0
         
         Ok(())

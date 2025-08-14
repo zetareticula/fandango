@@ -1,4 +1,4 @@
-use candle_core::{Tensor, Device, DType};
+use candle_core::{Tensor, Device, DType, Result as CandleResult};
 use candle_nn::{Linear, Module, VarBuilder, VarMap};
 use std::path::Path;
 use thiserror::Error;
@@ -16,7 +16,8 @@ pub enum AttentionError {
     Anyhow(#[from] anyhow::Error),
 }
 
-type Result<T> = std::result::Result<T, AttentionError>;
+/// Result type for attention operations
+pub type Result<T, E = AttentionError> = std::result::Result<T, E>;
 
 pub struct FusedAttention {
     device: Device,
@@ -150,7 +151,7 @@ mod tests {
     use candle_core::Device;
 
     #[tokio::test]
-    async fn test_fused_attention() -> Result<(), AttentionError> {
+    async fn test_fused_attention() -> Result<()> {
         let device = Device::Cpu;
         let input_dim = 64;
         let hidden_dim = 64;

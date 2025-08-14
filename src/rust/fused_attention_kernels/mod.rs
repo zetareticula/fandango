@@ -1,3 +1,7 @@
+
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+//
 //! Fused attention kernels for efficient transformer inference.
 //! This module provides optimized attention implementations for various hardware targets.
 

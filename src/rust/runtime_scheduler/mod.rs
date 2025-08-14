@@ -35,7 +35,8 @@ pub struct RuntimeScheduler {
 impl RuntimeScheduler {
     pub fn new(device: Device) -> Self {
         let (tx, rx) = mpsc::channel(32);
-        let kv_cache_mgr = Arc::new(Mutex::new(KVCacheManager::new(device)));
+        // Initialize KVCacheManager with 1MB buffer capacity by default
+        let kv_cache_mgr = Arc::new(Mutex::new(KVCacheManager::new(device, 1024 * 1024)));
         
         // Create and spawn the prefetch manager
         let prefetch_mgr = PrefetchManager::new(rx, Arc::clone(&kv_cache_mgr));

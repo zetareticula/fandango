@@ -98,6 +98,15 @@ pub struct BlockOutputs {
     pub values: std::collections::HashMap<String, serde_json::Value>,
 }
 
+impl BlockOutputs {
+    /// Create a new, empty BlockOutputs
+    pub fn new() -> Self {
+        Self {
+            values: std::collections::HashMap::new(),
+        }
+    }
+}
+
 /// A block instance in the workspace
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockInstance {

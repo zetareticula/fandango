@@ -1,3 +1,6 @@
+//! SPDX-License-Identifier: Apache-2.0
+//! This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+//! 
 //! Visual workspace implementation
 //! Handles the main workspace UI and interaction
 
@@ -275,49 +278,86 @@ impl VisualWorkspace {
         let mut pipeline = self.pipeline.take().unwrap();
         
         tokio::spawn(async move {
-            // Run the pipeline with periodic updates
+            // Create a channel for pause/stop control
+            let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(32);
+            
+            // Spawn a task to handle pause/stop control
+            let control_handle = tokio::spawn({
+                let should_pause = should_pause.clone();
+                let should_stop = should_stop.clone();
+                async move {
+                    let mut should_continue = true;
+                    while let Some(()) = control_rx.recv().await {
+                        // Check for stop first
+                        if *should_stop.lock().unwrap() {
+                            should_continue = false;
+                            break;
+                        }
+                        
+                        // Handle pause if needed
+                        if *should_pause.lock().unwrap() {
+                            // Wait until unpaused or stopped
+                            while *should_pause.lock().unwrap() {
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                
+                                if *should_stop.lock().unwrap() {
+                                    should_continue = false;
+                                    break;
+                                }
+                            }
+                            
+                            if !should_continue {
+                                break;
+                            }
+                        }
+                    }
+                    should_continue
+                    true
+                }
+            });
+            
+            // Run the pipeline with callbacks
             let result = pipeline.execute_with_callbacks(
+                // Progress callback
                 |block_id, block| {
                     // Update debug info
                     if let Some(debuggable) = block.as_any().downcast_ref::<Box<dyn Debuggable>>() {
-                        debug_info.lock().unwrap()
-                            .insert(block_id, debuggable.debug_info());
+                        if let Ok(mut debug_info_lock) = debug_info.lock() {
+                            debug_info_lock.insert(block_id, debuggable.debug_info());
                             
-                        if let Some(block_metrics) = debuggable.metrics() {
-                            metrics.lock().unwrap()
-                                .insert(block_id, block_metrics);
-                        }
-                    }
-                    
-                    // Update progress
-                    *progress.lock().unwrap() = block_id.0 as f32 / 100.0; // Simple progress estimation
-                    
-                    // Check for pause/stop
-                    let should_pause = *should_pause.lock().unwrap();
-                    let should_stop = *should_stop.lock().unwrap();
-                    
-                    if should_stop {
-                        return false; // Stop execution
-                    }
-                    
-                    if should_pause {
-                        // Wait until unpaused
-                        while *should_pause.lock().unwrap() {
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                            
-                            if *should_stop.lock().unwrap() {
-                                return false; // Stop if requested while paused
+                            if let Some(block_metrics) = debuggable.metrics() {
+                                if let Ok(mut metrics_lock) = metrics.lock() {
+                                    metrics_lock.insert(block_id, block_metrics);
+                                }
                             }
                         }
                     }
                     
-                    true // Continue execution
-                }
+                    // Update progress (using a simple counter for now)
+                    if let Ok(mut progress_lock) = progress.lock() {
+                        *progress_lock = block_id.0.as_u128() as f32 / 100.0; // Simple progress estimation
+                    }
+                    
+                    // Check for pause/stop
+                    let _ = control_tx.try_send(());
+                },
+                // Completion callback
+                |block_id, block, result| {
+                    // Handle block completion if needed
+                    if let Ok(mut progress_lock) = progress.lock() {
+                        *progress_lock = block_id.0.as_u128() as f32 / 100.0;
+                    }
+                },
             ).await;
+            
+            // Cancel the control task
+            control_handle.abort();
             
             match result {
                 Ok(_) => {
-                    *progress.lock().unwrap() = 1.0;
+                    if let Ok(mut progress_lock) = progress.lock() {
+                        *progress_lock = 1.0;
+                    }
                     // TODO: Notify UI of completion
                 },
                 Err(e) => {

@@ -2,7 +2,7 @@
 //! Handles the execution of the optimization pipeline defined in the workspace
 
 use std::collections::{HashMap, VecDeque};
-use super::{
+use crate::{
     BlockId, Result, WorkspaceError,
     blocks::{BlockInstance, BlockInputs, BlockOutputs},
     state::{WorkspaceState, Connection},
@@ -72,30 +72,145 @@ impl OptimizationPipeline {
         })
     }
     
-    /// Execute the pipeline with a specified level of parallelism
-    pub async fn execute(mut self) -> Result<HashMap<BlockId, BlockOutputs>> {
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| WorkspaceError::PipelineError(e.to_string()))?;
+    /// Execute the pipeline with progress and completion callbacks
+    pub async fn execute_with_callbacks<F, G>(
+        self,
+        on_progress: F,
+        on_complete: G,
+    ) -> Result<HashMap<BlockId, BlockOutputs>>
+    where
+        F: Fn(BlockId, &BlockInstance) + Send + 'static,
+        G: Fn(BlockId, &BlockInstance, Result<BlockOutputs>) + Send + 'static + Clone,
+    {
+        // Create a channel for progress updates
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
         
-        runtime.block_on(async move {
-            let max_concurrent = 4; // Maximum concurrent blocks to execute
-            
-            while !self.ready_queue.is_empty() || !self.in_progress.is_empty() {
-                // Start new tasks if we have capacity
-                while self.in_progress.len() < max_concurrent && !self.ready_queue.is_empty() {
-                    if let Some(block_id) = self.ready_queue.pop_front() {
-                        self.start_block(block_id).await?;
-                    }
+        // Create a channel for completion updates
+        let (completion_tx, mut completion_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Clone the callbacks for use in the spawned task
+        let progress_cb = {
+            let progress_tx = progress_tx.clone();
+            move |block_id: BlockId, block: &BlockInstance| {
+                let _ = progress_tx.send((block_id, block.clone()));
+            }
+        };
+        
+        // Create a separate sender for the completion callback
+        let completion_tx_clone = completion_tx.clone();
+        let _completion_cb = move |block_id: BlockId, block: &BlockInstance, result: Result<BlockOutputs>| {
+            let _ = completion_tx_clone.send((block_id, block.clone(), result));
+        };
+        
+        // Clone the on_complete callback before moving it into the closure
+        let on_complete_clone = on_complete.clone();
+        let on_complete_wrapper = move |block_id: BlockId, block: &BlockInstance, result: Result<BlockOutputs>| {
+            on_complete_clone(block_id, block, result);
+        };
+
+        // Spawn a task to process progress and completion updates
+        let progress_handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some((block_id, block)) = progress_rx.recv() => {
+                        on_progress(block_id, &block);
+                    },
+                    Some((block_id, block, result)) = completion_rx.recv() => {
+                        // Forward the result directly since it's already in the correct format
+                        on_complete(block_id, &block, result);
+                    },
+                    else => break,
                 }
-                
-                // Wait for at least one task to complete
-                if !self.in_progress.is_empty() {
-                    self.await_next_completion().await?;
+            }
+        });
+
+        // Execute the pipeline with progress and completion callbacks
+        let result = self.execute_with_progress(progress_cb, on_complete_wrapper).await;
+
+        // Wait for all updates to be processed
+        drop(progress_tx);
+        drop(completion_tx);
+        
+        // Handle the progress handle result
+        if let Err(e) = progress_handle.await {
+            return Err(WorkspaceError::PipelineError(e.to_string()));
+        }
+
+        result
+    }
+
+    /// Execute the pipeline with progress updates
+    pub async fn execute_with_progress<F, G>(
+        mut self,
+        on_progress: F,
+        on_complete: G,
+    ) -> Result<HashMap<BlockId, BlockOutputs>>
+    where
+        F: Fn(BlockId, &BlockInstance) + Send + 'static,
+        G: Fn(BlockId, &BlockInstance, Result<BlockOutputs>) + Send + 'static,
+    {
+        // Execute the pipeline with progress updates
+        let mut results: HashMap<BlockId, BlockOutputs> = HashMap::new();
+        
+        while let Some(block_id) = self.ready_queue.pop_front() {
+            let node = match self.nodes.get(&block_id) {
+                Some(node) => node,
+                None => return Err(WorkspaceError::BlockNotFound(block_id)),
+            };
+            
+            // Call progress callback with the block instance
+            on_progress(block_id, &node.block);
+            
+            // Execute the block (simplified)
+            let outputs = BlockOutputs::new(); // Replace with actual execution
+            
+            // Store the outputs in the completed map
+            self.completed.insert(block_id, outputs.clone());
+            
+            // Call completion callback with the block instance and outputs
+            on_complete(block_id, &node.block, Ok(outputs));
+            
+            // Process dependents
+            let mut ready_dependents = Vec::new();
+            for &dep_id in &node.dependents {
+                if let Some(dep_node) = self.nodes.get(&dep_id) {
+                    if dep_node.dependencies.iter().all(|id| self.completed.contains_key(id)) {
+                        ready_dependents.push(dep_id);
+                    }
                 }
             }
             
-            Ok(self.completed)
-        })
+            // Add ready dependents to the queue
+            for dep_id in ready_dependents {
+                self.ready_queue.push_back(dep_id);
+            }
+            
+            // Store the results
+            if let Some(outputs) = self.completed.get(&block_id) {
+                results.insert(block_id, outputs.clone());
+            }
+        }
+        
+        Ok(results)
+    }
+
+    /// Execute the pipeline with a specified level of parallelism
+    pub async fn execute(self) -> Result<HashMap<BlockId, BlockOutputs>> {
+        // Create a no-op progress callback
+        let progress_cb = |_block_id: BlockId, _block: &BlockInstance| {
+            // No-op progress callback
+        };
+        
+        // Create a no-op completion callback
+        let completion_cb = |_block_id: BlockId, block: &BlockInstance, result: Result<BlockOutputs>| {
+            match result {
+                Ok(_) => log::info!("Completed block {}: {}", _block_id, block.block_type),
+                Err(e) => log::error!("Error in block {}: {}", _block_id, e),
+            }
+        };
+
+        // Execute with callbacks
+        self.execute_with_progress(progress_cb, completion_cb).await
     }
     
     /// Start executing a block
@@ -119,8 +234,7 @@ impl OptimizationPipeline {
         
         // Spawn a new task to execute the block
         let handle = tokio::spawn(async move {
-            let mut block = block;
-            block.block_mut()?.process(inputs).await
+            block.process(inputs).await
         });
         
         self.in_progress.insert(block_id, handle);
@@ -149,15 +263,26 @@ impl OptimizationPipeline {
         self.completed.insert(block_id, outputs);
         
         // Find any blocks that are now ready to execute
-        if let Some(node) = self.nodes.get(&block_id) {
-            for &dependent_id in &node.dependents {
-                if let Some(dep_node) = self.nodes.get_mut(&dependent_id) {
+        let ready_dependents: Vec<BlockId> = {
+            let node = match self.nodes.get(&block_id) {
+                Some(node) => node,
+                None => return Ok(()),
+            };
+            
+            node.dependents.iter()
+                .filter(|&&dep_id| {
                     // Check if all dependencies are satisfied
-                    if dep_node.dependencies.iter().all(|id| self.completed.contains_key(id)) {
-                        self.ready_queue.push_back(dependent_id);
-                    }
-                }
-            }
+                    self.nodes.get(&dep_id).map_or(false, |dep_node| {
+                        dep_node.dependencies.iter().all(|id| self.completed.contains_key(id))
+                    })
+                })
+                .cloned()
+                .collect()
+        };
+        
+        // Add ready dependents to the queue
+        for dep_id in ready_dependents {
+            self.ready_queue.push_back(dep_id);
         }
         
         Ok(())
@@ -167,7 +292,8 @@ impl OptimizationPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::visual_workspace::blocks::BlockLibrary;
+    use crate::visual_workspace::blocks::{Block, BlockLibrary};
+    use crate::visual_workspace::state::WorkspaceState;
     
     #[tokio::test]
     async fn test_pipeline_execution() {

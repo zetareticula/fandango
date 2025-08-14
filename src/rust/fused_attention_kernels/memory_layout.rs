@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+//
+// This file implements the memory layout for a feed-forward network (FFN).
+// It manages the matrix of weights, pointers to original neuron indices, biases, and tracks the number of utilized rows and last k active neurons.
+
 use candle_core::{Tensor, DType, Device};
 use thiserror::Error;
 

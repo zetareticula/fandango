@@ -7,23 +7,52 @@
 // while the locality function measures how close values are to the mean of the data.
 
 //! Storage engine implementation for the Fandango project.
+//! 
+//! This module provides a self-designing storage engine that can optimize its layout
+//! based on access patterns and workload characteristics.
 
-use candle_core::{Tensor, Device, DType, Error as CandleError};
-use candle_core::error::Result as CandleResult;
+use candle_core::{Tensor, Device, DType};
+use candle_core::error::Error as CandleError;
 use std::fmt;
+use thiserror::Error;
 
-// Re-export CandleResult for consistency
-pub use candle_core::error::Result as Result;
+// Submodules
+pub mod learned_structures;
 
-/// Convert a string error into a CandleError
-fn err_msg<S: Into<String>>(msg: S) -> CandleError {
-    CandleError::Msg(msg.into())
+// Re-export types
+pub use learned_structures::LearnedStructure;
+
+/// Error type for storage engine operations
+#[derive(Error, Debug)]
+pub enum StorageEngineError {
+    #[error("Generic error: {0}")]
+    Generic(String),
+    
+    #[error("Initialization error: {0}")]
+    Initialization(String),
+    
+    #[error("Operation not supported: {0}")]
+    NotSupported(String),
+    
+    #[error(transparent)]
+    CandleError(#[from] CandleError),
+}
+
+// Re-export the error type
+pub use StorageEngineError::*;
+
+/// Result type for storage engine operations
+pub type Result<T, E = StorageEngineError> = std::result::Result<T, E>;
+
+/// Convert a string error into a StorageEngineError
+fn err_msg<S: Into<String>>(msg: S) -> StorageEngineError {
+    StorageEngineError::Generic(msg.into())
 }
 
 /// Trait for self-designing storage engines
 pub trait SelfDesigningEngine: Send + Sync + 'static {
     /// Optimizes the storage layout based on access patterns
-    fn optimize_layout(&mut self) -> CandleResult<()>;
+    fn optimize_layout(&mut self) -> Result<(), CandleError>;
 }
 
 /// Default implementation of SelfDesigningEngine
@@ -45,7 +74,7 @@ impl DefaultSelfDesigningEngine {
 }
 
 impl SelfDesigningEngine for DefaultSelfDesigningEngine {
-    fn optimize_layout(&mut self) -> CandleResult<()> {
+    fn optimize_layout(&mut self) -> Result<(), CandleError> {
         // Simple optimization logic - can be enhanced based on actual requirements
         log::info!("Optimizing storage layout for dataset size: {}", self.dataset_size);
         // In a real implementation, this would analyze access patterns and optimize the layout
@@ -62,25 +91,7 @@ impl fmt::Debug for DefaultSelfDesigningEngine {
     }
 }
 
-/// Represents a learned structure in the storage engine
-#[derive(Debug, Clone)]
-pub struct LearnedStructure {
-    pub name: String,
-    pub parameters: Tensor,
-}
-
-impl LearnedStructure {
-    /// Creates a new LearnedStructure
-    pub fn new(device: Device, num_layers: usize) -> Result<Self, candle_core::Error> {
-        // Initialize parameters with zeros
-        let parameters = Tensor::zeros(&[num_layers as usize, 64], DType::F32, &device)?;
-        
-        Ok(Self {
-            name: "learned_structure".to_string(),
-            parameters,
-        })
-    }
-}
+/// The LearnedStructure type is defined in the learned_structures module
 
 /// Defines the design space for the storage engine
 pub struct DesignSpace {

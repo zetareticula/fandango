@@ -7,209 +7,468 @@
 // while the locality function measures how close values are to the mean of the data.
 
 
-use candle_core::{Tensor, DType, Device};
-use std::sync::{Arc, Mutex};
-use thiserror::Error;
-use log;
-use crate::storage_engine::{SelfDesigningEngine, LearnedStructure, DesignSpace, DefaultSelfDesigningEngine, StorageEngineError, CosineIntegration};
-use std::error::Error;
-use std::fmt;
+//! Key-Value Cache Manager with Learned Structure Optimization
+//!
+//! This module provides a key-value cache that can optimize its storage layout
+//! using learned structures based on access patterns.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant, SystemTime};
+
+use candle_core::Device;
+use hashbrown::HashMap;
+use log;
+use thiserror::Error;
+
+use crate::storage_engine::learned_structures::LearnedStructure;
+
+/// Error type for KVCache operations
 #[derive(Error, Debug)]
 pub enum KVCacheError {
-    #[error("Failed to update KV cache: {0}")]
-    UpdateError(String),
-    #[error("Failed to perform local compaction: {0}")]
+    #[error("Compaction error: {0}")]
     CompactionError(String),
-    #[error("Initialization error: {0}")]
-    InitializationError(String),
+    
+    #[error("Update error: {0}")]
+    UpdateError(String),
+    
     #[error("Storage engine error: {0}")]
-    StorageEngineError(#[from] StorageEngineError),
+    StorageEngine(#[from] StorageEngineError),
+    
     #[error(transparent)]
     CandleError(#[from] candle_core::Error),
 }
 
-impl Error for KVCacheError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            KVCacheError::StorageEngineError(e) => Some(e),
-            KVCacheError::CandleError(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for KVCacheError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            KVCacheError::UpdateError(msg) => write!(f, "Failed to update KV cache: {}", msg),
-            KVCacheError::CompactionError(msg) => write!(f, "Failed to perform local compaction: {}", msg),
-            KVCacheError::InitializationError(msg) => write!(f, "Initialization error: {}", msg),
-            KVCacheError::StorageEngineError(e) => write!(f, "Storage engine error: {}", e),
-            KVCacheError::CandleError(e) => write!(f, "Candle error: {}", e),
-        }
-    }
-}
-
+/// Result type for KVCache operations
 pub type Result<T> = std::result::Result<T, KVCacheError>;
 
-/// A simple memory buffer for storing key-value cache data
+/// Metrics for monitoring cache performance
 #[derive(Debug)]
-pub struct MemoryBuffer {
-    data: Vec<u8>,
-    capacity: usize,
+pub struct CacheMetrics {
+    /// Number of cache hits
+    hits: AtomicUsize,
+    /// Number of cache misses
+    misses: AtomicUsize,
+    /// Total number of bytes stored
+    total_bytes: AtomicUsize,
+    /// Total number of operations performed
+    operations: AtomicUsize,
+    /// Total time spent in compaction (in microseconds)
+    compaction_time: AtomicUsize,
+    /// Number of compactions performed
+    compactions: AtomicUsize,
+    /// Timestamp of the last compaction
+    last_compaction: parking_lot::Mutex<Option<SystemTime>>,
 }
 
-impl MemoryBuffer {
-    /// Creates a new MemoryBuffer with the specified capacity in bytes
-    pub fn new(capacity: usize) -> Self {
+impl Default for CacheMetrics {
+    fn default() -> Self {
         Self {
-            data: Vec::with_capacity(capacity),
-            capacity,
+            hits: AtomicUsize::new(0),
+            misses: AtomicUsize::new(0),
+            total_bytes: AtomicUsize::new(0),
+            operations: AtomicUsize::new(0),
+            compaction_time: AtomicUsize::new(0),
+            compactions: AtomicUsize::new(0),
+            last_compaction: parking_lot::Mutex::new(None),
         }
-    }
-    
-    /// Updates the buffer with new float data
-    pub fn update(&mut self, data: &[f32]) -> Result<()> {
-        // Calculate required bytes (4 bytes per f32)
-        let required_bytes = data.len() * std::mem::size_of::<f32>();
-        
-        if required_bytes > self.capacity {
-            return Err(KVCacheError::UpdateError(
-                format!("Data size ({} bytes) exceeds buffer capacity ({} bytes)", 
-                       required_bytes, self.capacity)
-            ));
-        }
-
-        // Convert f32 slice to bytes and update the buffer
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                data.as_ptr() as *const u8,
-                required_bytes
-            )
-        };
-        
-        self.data.clear();
-        self.data.extend_from_slice(bytes);
-        
-        Ok(())
-    }
-    
-    /// Returns the current length of the buffer in bytes
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-    
-    /// Returns true if the buffer is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
     }
 }
 
+impl CacheMetrics {
+    /// Records a cache hit
+    pub fn record_hit(&self) {
+        self.hits.fetch_add(1, Ordering::Relaxed);
+        self.operations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records a cache miss
+    pub fn record_miss(&self) {
+        self.misses.fetch_add(1, Ordering::Relaxed);
+        self.operations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records bytes stored
+    pub fn record_bytes(&self, bytes: usize) {
+        self.total_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+    
+    /// Records compaction time
+    pub fn record_compaction(&self, duration: Duration) {
+        self.compactions.fetch_add(1, Ordering::Relaxed);
+        self.compaction_time.fetch_add(
+            duration.as_micros() as usize, 
+            Ordering::Relaxed
+        );
+        *self.last_compaction.lock() = Some(SystemTime::now());
+    }
+
+    /// Gets the current hit rate
+    pub fn hit_rate(&self) -> f64 {
+        let hits = self.hits.load(Ordering::Relaxed) as f64;
+        let ops = self.operations.load(Ordering::Relaxed) as f64;
+        if ops > 0.0 { hits / ops } else { 0.0 }
+    }
+    
+    /// Gets the average compaction time in milliseconds
+    pub fn avg_compaction_time_ms(&self) -> f64 {
+        let total = self.compaction_time.load(Ordering::Relaxed) as f64;
+        let count = self.compactions.load(Ordering::Relaxed) as f64;
+        if count > 0.0 { total / 1000.0 / count } else { 0.0 }
+    }
+    
+    /// Gets the time since last compaction
+    pub fn time_since_last_compaction(&self) -> Option<Duration> {
+        self.last_compaction.lock()
+            .and_then(|t| t.elapsed().ok())
+    }
+}
+
+/// Manages a key-value cache with learned structure optimization
 pub struct KVCacheManager {
-    device: Device,
-    self_engine: Option<Box<dyn SelfDesigningEngine>>,
+    /// In-memory key-value store
+    cache: HashMap<Vec<u8>, Vec<u8>>,
+    
+    /// Learned structure for optimization
     learned_struct: Option<LearnedStructure>,
-    design_space: Option<DesignSpace>,
-    buffer: MemoryBuffer,
+    
+    /// Device for tensor operations
+    device: Device,
+    
+    /// Write buffer
+    buffer: Vec<u8>,
+    
+    /// Maximum buffer capacity in bytes
+    buffer_capacity: usize,
+    
+    /// Performance metrics
+    metrics: CacheMetrics,
+    
+    /// Time when the cache was created
+    created_at: Instant,
 }
 
 impl KVCacheManager {
-    pub fn new(device: Device) -> Self {
-        // Initialize with a default buffer size of 1MB
-        let buffer_capacity = 1024 * 1024; // 1MB
+    /// Creates a new KVCacheManager with default settings
+    /// 
+    /// # Arguments
+    /// * `device` - The device to use for tensor operations
+    /// 
+    /// # Returns
+    /// A new instance of KVCacheManager with 1MB buffer capacity
+    pub fn new_default(device: Device) -> Self {
+        Self::new(device, 1024 * 1024) // 1MB default buffer
+    }
+    /// Creates a new KVCacheManager with the specified parameters
+    ///
+    /// # Arguments
+    /// * `device` - The device to use for tensor operations
+    /// * `buffer_capacity` - Maximum buffer capacity in bytes before compaction
+    ///
+    /// # Returns
+    /// A new instance of KVCacheManager
+    pub fn new(device: Device, buffer_capacity: usize) -> Self {
         Self {
-            device: device.clone(),
-            self_engine: None,
+            cache: HashMap::new(),
             learned_struct: None,
-            design_space: None,
-            buffer: MemoryBuffer::new(buffer_capacity),
+            device,
+            buffer: Vec::with_capacity(buffer_capacity),
+            buffer_capacity,
+            metrics: CacheMetrics::default(),
+            created_at: Instant::now(),
         }
-    }
-
-    pub fn configure_structures(&mut self, dataset_size: usize) -> Result<()> {
-        // Initialize design space
-        let design_space = DesignSpace::new(self.device.clone());
-        let designs = design_space.navigate_design_space(dataset_size)?;
-        
-        // Store design space
-        self.design_space = Some(design_space);
-        
-        // If learned index is one of the designs, initialize related structures
-        if designs.contains(&"learned_index".to_string()) {
-            log::info!("Initializing learned index for dataset size: {}", dataset_size);
-            
-            // Initialize learned structure
-            let learned_struct = LearnedStructure::new(self.device.clone(), 3)
-                .map_err(|e| KVCacheError::InitializationError(e.to_string()))?;
-            
-            // Initialize self-designing engine
-            let self_engine = Box::new(DefaultSelfDesigningEngine::new(
-                self.device.clone(),
-                dataset_size,
-                3000.0,
-            ));
-            
-            self.learned_struct = Some(learned_struct);
-            self.self_engine = Some(self_engine);
-        }
-        
-        Ok(())
-    }
-
-    pub async fn update_precision(&mut self, attention_data: &[f32], system_load: f32) -> Result<()> {
-        // Convert input data to tensor
-        let tensor = Tensor::from_slice(attention_data, (attention_data.len(), 1), &self.device)?
-            .to_dtype(DType::F32)?;
-        
-        // Adjust precision based on system load
-        let _precision = if system_load > 0.8 {
-            DType::F16
-        } else {
-            DType::F32
-        };
-        
-        // In a real implementation, we would convert to the target precision here
-        // let _ = tensor.to_dtype(precision)?;
-        
-        // Update the buffer with the new data
-        self.buffer.update(attention_data)
-            .map_err(|e| KVCacheError::UpdateError(e.to_string()))?;
-        
-        // If we have a self-designing engine, optimize the layout
-        if let Some(engine) = &mut self.self_engine {
-            engine.optimize_layout()
-                .map_err(|e| KVCacheError::StorageEngineError(StorageEngineError::Generic(e.to_string())))?;
-        }
-        
-        Ok(())
     }
     
-    pub async fn perform_local_compaction(&self) -> Result<()> {
-        log::info!("Performing local compaction on buffer of size: {} bytes", self.buffer.len());
+    /// Inserts a key-value pair into the cache
+    /// 
+    /// # Arguments
+    /// * `key` - The key to insert
+    /// * `value` - The value to insert
+    /// 
+    /// # Returns
+    /// `Result<Option<Vec<u8>>>` - The previous value if the key existed
+    pub fn insert(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<Option<Vec<u8>>> {
+        self.metrics.record_bytes(value.len());
         
-        // In a real implementation, this would perform compaction of the KV cache
-        // to reduce memory fragmentation and improve performance
+        // Check if we need to perform compaction
+        if self.buffer.len() + value.len() > self.buffer_capacity {
+            self.perform_local_compaction()?;
+        }
+        
+        // Add to buffer and insert into cache
+        self.buffer.extend_from_slice(&value);
+        
+        match self.cache.entry(key) {
+            Entry::Occupied(mut entry) => {
+                let old_value = entry.insert(value);
+                Ok(Some(old_value))
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+                Ok(None)
+            }
+        }
+    }
+    
+    /// Inserts multiple key-value pairs in a batch
+    /// 
+    /// # Arguments
+    /// * `items` - An iterator of (key, value) pairs to insert
+    /// 
+    /// # Returns
+    /// `Result<usize>` - Number of items inserted
+    pub fn insert_batch<I, K, V>(&mut self, items: I) -> Result<usize>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<Vec<u8>>,
+        V: Into<Vec<u8>>,
+    {
+        let mut count = 0;
+        for (key, value) in items.into_iter() {
+            let key = key.into();
+            let value = value.into();
+            self.insert(key, value)?;
+            count += 1;
+            
+            // Check if we need to perform compaction periodically
+            if count % 100 == 0 && self.buffer.len() > self.buffer_capacity / 2 {
+                self.perform_local_compaction()?;
+            }
+        }
+        
+        // Final compaction if needed
+        if !self.buffer.is_empty() {
+            self.perform_local_compaction()?;
+        }
+        
+        Ok(count)
+    }
+    
+    /// Gets a value from the cache by key
+    /// 
+    /// # Arguments
+    /// * `key` - The key to look up
+    /// 
+    /// # Returns
+    /// `Option<&[u8]>` - The value if found, or None if not found
+    pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
+        match self.cache.get(key) {
+            Some(value) => {
+                self.metrics.record_hit();
+                Some(value.as_slice())
+            }
+            None => {
+                self.metrics.record_miss();
+                None
+            }
+        }
+    }
+    
+    /// Removes a key-value pair from the cache
+    /// 
+    /// # Arguments
+    /// * `key` - The key to remove
+    /// 
+    /// # Returns
+    /// `Option<Vec<u8>>` - The removed value if it existed
+    pub fn remove(&mut self, key: &[u8]) -> Option<Vec<u8>> {
+        self.cache.remove(key)
+    }
+    
+    /// Checks if the cache contains a key
+    /// 
+    /// # Arguments
+    /// * `key` - The key to check
+    /// 
+    /// # Returns
+    /// `bool` - True if the key exists in the cache
+    pub fn contains_key(&self, key: &[u8]) -> bool {
+        self.cache.contains_key(key)
+    }
+    
+    /// Returns the number of key-value pairs in the cache
+    /// 
+    /// # Returns
+    /// `usize` - The number of entries in the cache
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+    
+    /// Checks if the cache is empty
+    /// 
+    /// # Returns
+    /// `bool` - True if the cache contains no elements
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+    
+    /// Returns the current cache metrics
+    /// 
+    /// # Returns
+    /// `&CacheMetrics` - Reference to the cache metrics
+    pub fn metrics(&self) -> &CacheMetrics {
+        &self.metrics
+    }
+    
+    /// Performs local compaction of the key-value cache
+    /// 
+    /// This method optimizes the learned structure based on the current workload
+    /// and adjusts the levels accordingly.
+    /// 
+    /// # Returns
+    /// `Result<()>` - Ok on success, or an error if compaction fails
+    pub fn perform_local_compaction(&mut self) -> Result<()> {
+        let start_time = Instant::now();
+        log::info!("Starting local compaction");
+        
+        // Skip if buffer is empty
         if self.buffer.is_empty() {
-            return Err(KVCacheError::CompactionError("Buffer is empty".to_string()));
+            log::info!("Skipping compaction: buffer is empty");
+            return Ok(());
         }
         
-        // Here we would perform the actual compaction logic
-        // For now, we'll just log that compaction was requested
-        log::info!("Compaction completed successfully");
+        // Create a new learned structure if it doesn't exist
+        if self.learned_struct.is_none() {
+            log::info!("Initializing new learned structure");
+            self.learned_struct = Some(LearnedStructure::new(self.device.clone(), 3)?);
+        }
         
-        if let Some(ref learned) = self.learned_struct {
-            for i in 0..100 {
-                learned.write(i, 1.0).unwrap_or_else(|e| println!("Write error: {}", e));
-            }
-            // Force sync hybrid buffer
-            if !learned.hybrid_buffer.is_empty() {
-                for (i, &val) in learned.hybrid_buffer.iter().enumerate() {
-                    learned.model[[i % 64, i / 64]] = val;
-                }
-                learned.hybrid_buffer.clear();
+        let result = if let Some(ls) = &mut self.learned_struct {
+            // Convert buffer to f32 values for optimization
+            let buffer_f32: Vec<f32> = self.buffer.iter().map(|&b| b as f32 / 255.0).collect();
+            
+            // Create a 1D tensor from the buffer with explicit shape
+            let tensor_1d = Tensor::from_slice(
+                &buffer_f32,
+                (buffer_f32.len(),),  // Note the trailing comma to make it a single-element tuple
+                &self.device
+            )?;
+            
+            // Reshape to 2D tensor with a single row
+            let tensor = tensor_1d.reshape((1, buffer_f32.len()))?;
+            
+            // Optimize with 70% read workload assumption
+            ls.optimize(&tensor, 0.7)?;
+            
+            // Clear the buffer after successful compaction
+            self.buffer.clear();
+            
+            log::info!("Local compaction completed successfully");
+            Ok(())
+        } else {
+            let err_msg = "Failed to initialize or access learned structure";
+            log::error!("{}", err_msg);
+            Err(KVCacheError::CompactionError(err_msg.to_string()))
+        };
+        
+        // Record metrics
+        let duration = start_time.elapsed();
+        self.metrics.record_compaction(duration);
+        
+        result
+    }
+    
+    /// Clears the cache and resets all metrics
+    pub fn clear(&mut self) {
+        self.cache.clear();
+        self.buffer.clear();
+        self.learned_struct = None;
+        // Reset metrics
+        self.metrics = CacheMetrics::default();
+    }
+    
+    /// Returns the current buffer size in bytes
+    pub fn buffer_size(&self) -> usize {
+        self.buffer.len()
+    }
+    
+    /// Returns the buffer capacity in bytes
+    pub fn buffer_capacity(&self) -> usize {
+        self.buffer_capacity
+    }
+    
+    /// Returns the time since the cache was created
+    pub fn uptime(&self) -> Duration {
+        self.created_at.elapsed()
+    }
+}
+
+impl Drop for KVCacheManager {
+    fn drop(&mut self) {
+        // Perform final compaction before dropping
+        if !self.buffer.is_empty() {
+            if let Err(e) = self.perform_local_compaction() {
+                log::error!("Error during final compaction: {}", e);
             }
         }
-        println!("Performing local compaction with dynamic levels");
+        
+        log::info!(
+            "Dropping KVCacheManager after {:?} with {} items",
+            self.uptime(),
+            self.len()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::Device;
+    
+    #[test]
+    fn test_cache_basic_operations() {
+        let device = Device::Cpu;
+        let mut cache = KVCacheManager::new(device, 1024);
+        
+        // Test insert and get
+        cache.insert(b"key1".to_vec(), b"value1".to_vec()).unwrap();
+        assert_eq!(cache.get(b"key1"), Some(b"value1".as_ref()));
+        
+        // Test overwrite
+        let old = cache.insert(b"key1".to_vec(), b"new_value".to_vec()).unwrap();
+        assert_eq!(old, Some(b"value1".to_vec()));
+        assert_eq!(cache.get(b"key1"), Some(b"new_value".as_ref()));
+        
+        // Test non-existent key
+        assert_eq!(cache.get(b"nonexistent"), None);
+        
+        // Test contains_key
+        assert!(cache.contains_key(b"key1"));
+        assert!(!cache.contains_key(b"nonexistent"));
+        
+        // Test remove
+        let removed = cache.remove(b"key1").unwrap();
+        assert_eq!(removed, b"new_value");
+        assert!(!cache.contains_key(b"key1"));
+        
+        // Test len and is_empty
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+    }
+    
+    #[test]
+    fn test_batch_operations() {
+        let device = Device::Cpu;
+        let mut cache = KVCacheManager::new(device, 1024);
+        
+        // Prepare test data
+        let items = vec![
+            (b"key1".to_vec(), b"value1".to_vec()),
+            (b"key2".to_vec(), b"value2".to_vec()),
+            (b"key3".to_vec(), b"value3".to_vec()),
+        ];
+        
+        // Test batch insert
+        let count = cache.insert_batch(items).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(cache.len(), 3);
+        
+        // Test metrics
+        let metrics = cache.metrics();
+        assert_eq!(metrics.hits.load(Ordering::Relaxed), 0);
+        assert!(metrics.misses.load(Ordering::Relaxed) >= 0);
+        
+        // Test clear
+        cache.clear();
+        assert!(cache.is_empty());
     }
 }

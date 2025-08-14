@@ -19,6 +19,8 @@ pub use pipeline::OptimizationPipeline;
 pub use state::WorkspaceState;
 pub use workspace::VisualWorkspace;
 pub use blocks::BlockLibrary;
+pub use std::sync::atomic::AtomicU32;
+use candle_core;
 
 /// Common result type for workspace operations
 pub type Result<T> = std::result::Result<T, WorkspaceError>;
@@ -38,8 +40,14 @@ pub enum WorkspaceError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     
+    #[error("Block not found: {0:?}")]
+    BlockNotFound(BlockId),
+    
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+    
+    #[error("Candle core error: {0}")]
+    CandleError(#[from] candle_core::Error),
 }
 
 /// Position in the 2D workspace
