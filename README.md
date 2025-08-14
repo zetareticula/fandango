@@ -1,12 +1,30 @@
-# 🎭 Fandango
-
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Rust](https://github.com/zetareticula/fandango/actions/workflows/rust.yml/badge.svg)](https://github.com/zetareticula/fandango/actions/workflows/rust.yml)
-[![codecov](https://codecov.io/gh/zetareticula/fandango/graph/badge.svg?token=YOUR_TOKEN_HERE)](https://codecov.io/gh/zetareticula/fandango)
+<div align="center">
+  <img src="assets/logo.svg" alt="Fandango Logo" width="200"/>
+  
+  # 🎭 Fandango
+  
+  [![Crates.io](https://img.shields.io/crates/v/fandango.svg)](https://crates.io/crates/fandango)
+  [![Documentation](https://docs.rs/fandango/badge.svg)](https://docs.rs/fandango)
+  [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+  [![Rust](https://github.com/zetareticula/fandango/actions/workflows/rust.yml/badge.svg)](https://github.com/zetareticula/fandango/actions/workflows/rust.yml)
+  [![codecov](https://codecov.io/gh/zetareticula/fandango/graph/badge.svg?token=YOUR_TOKEN_HERE)](https://codecov.io/gh/zetareticula/fandango)
+  [![Discord](https://img.shields.io/discord/YOUR_DISCORD_ID.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/YOUR_INVITE_LINK)
+</div>
 
 ## 🚀 Overview
 
 Fandango is a high-performance, open-source framework for optimizing large language model (LLM) inference through advanced quantization techniques and dynamic precision scaling. Built with Rust for performance and reliability, it provides a robust platform for deploying efficient LLM applications in production environments.
+
+### 🎯 Use as a Quantization Layer
+
+Fandango can be seamlessly integrated as a quantization layer in your ML pipeline. Whether you're working with PyTorch, TensorFlow, or JAX models, Fandango provides:
+
+- **Universal Model Support**: Quantize any model architecture
+- **Multiple Precision Options**: From 2-bit to 16-bit quantization
+- **Hardware Acceleration**: Optimized for CPU, CUDA, and Metal
+- **Simple API**: Easy integration with existing workflows
+
+📖 [Learn how to use Fandango as a quantization layer →](docs/QUANTIZATION_LAYER.md)
 
 ## ✨ Key Features
 
