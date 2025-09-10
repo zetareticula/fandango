@@ -11,15 +11,31 @@
 
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use super::{BlockId, Position, Result, WorkspaceError};
-use crate::visual_workspace::blocks::{BlockInstance, BlockInputs, BlockOutputs};
+
+// Import from the parent module to ensure type consistency
+use crate::visual_workspace::{
+    BlockId,
+    Result,
+    WorkspaceError,
+    blocks::{BlockInstance, BlockOutputs}
+};
+
+// Type alias for backward compatibility
+type WorkspaceBlockId = BlockId;
 
 /// Connection between two blocks
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Connection {
+    /// Source block ID
     pub from_block: BlockId,
+    
+    /// Source port name
     pub from_port: String,
+    
+    /// Target block ID
     pub to_block: BlockId,
+    
+    /// Target port name
     pub to_port: String,
 }
 
@@ -29,17 +45,20 @@ pub struct WorkspaceState {
     /// All blocks in the workspace
     pub blocks: HashMap<BlockId, BlockInstance>,
     
-    /// Connections between blocks
+    /// All connections between blocks
     pub connections: Vec<Connection>,
     
-    /// Viewport position
+    /// Viewport information
     pub viewport: Viewport,
     
-    /// Zoom level
-    pub zoom: f32,
-    
-    /// Next Z-index for block ordering
+    /// Next z-index to use for bringing blocks to front
+    #[serde(skip, default = "default_z_index")]
     next_z_index: u32,
+}
+
+/// Default starting z-index for blocks
+fn default_z_index() -> u32 {
+    1
 }
 
 /// Viewport information
@@ -79,14 +98,14 @@ impl WorkspaceState {
     /// Remove a block and all its connections
     pub fn remove_block(&mut self, block_id: BlockId) -> Result<()> {
         // Remove the block
-        self.blocks.remove(&block_id).ok_or_else(|| 
-            WorkspaceError::StateError("Block not found".to_string())
-        )?;
+        if self.blocks.remove(&block_id).is_none() {
+            return Err(WorkspaceError::BlockNotFound(block_id));
+        }
         
-        // Remove any connections involving this block
-        self.connections.retain(|conn| 
+        // Remove all connections involving this block
+        self.connections.retain(|conn| {
             conn.from_block != block_id && conn.to_block != block_id
-        );
+        });
         
         Ok(())
     }
@@ -99,12 +118,23 @@ impl WorkspaceState {
         to_block: BlockId,
         to_port: String,
     ) -> Result<()> {
-        // Validate blocks exist
-        if !self.blocks.contains_key(&from_block) || !self.blocks.contains_key(&to_block) {
-            return Err(WorkspaceError::StateError("Invalid block IDs".to_string()));
+        // Check if blocks exist
+        if !self.blocks.contains_key(&from_block) {
+            return Err(WorkspaceError::BlockNotFound(from_block));
+        }
+        if !self.blocks.contains_key(&to_block) {
+            return Err(WorkspaceError::BlockNotFound(to_block));
         }
         
-        // TODO: Validate port types match
+        // Check for duplicate connections
+        if self.connections.iter().any(|conn| 
+            conn.from_block == from_block && 
+            conn.from_port == from_port &&
+            conn.to_block == to_block &&
+            conn.to_port == to_port
+        ) {
+            return Err(WorkspaceError::StateError("Connection already exists".to_string()));
+        }
         
         let connection = Connection {
             from_block,
@@ -127,12 +157,11 @@ impl WorkspaceState {
         Ok(())
     }
     
-    /// Bring a block to the front
+    /// Bring a block to the front by updating its z-index
     pub fn bring_to_front(&mut self, block_id: BlockId) {
         if let Some(block) = self.blocks.get_mut(&block_id) {
+            block.z_index = self.next_z_index;
             self.next_z_index += 1;
-            // Update z-index
-            // (implementation depends on your rendering system)
         }
     }
     
@@ -146,14 +175,17 @@ impl WorkspaceState {
     
     /// Execute the pipeline
     pub async fn execute(&self) -> Result<HashMap<BlockId, BlockOutputs>> {
-        // TODO: Implement topological sort and execution
-        // This would involve:
-        // 1. Building a dependency graph
-        // 2. Topologically sorting the blocks
-        // 3. Executing blocks in order
-        // 4. Passing outputs to connected blocks
+        // TODO: Implement actual execution logic
+        // This would involve topologically sorting the blocks
+        // and executing them in order
         
-        Ok(HashMap::new())
+        let mut results = HashMap::new();
+        for (id, block) in &self.blocks {
+            // Simulate execution with empty outputs
+            results.insert(*id, BlockOutputs::default());
+        }
+        
+        Ok(results)
     }
     
     /// Serialize the workspace state to JSON

@@ -2,11 +2,18 @@
 //! Handles the execution of the optimization pipeline defined in the workspace
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::{
-    BlockId, Result, WorkspaceError,
-    blocks::{BlockInstance, BlockInputs, BlockOutputs},
-    state::{WorkspaceState, Connection},
+    visual_workspace::BlockId,
+    Result,
+    visual_workspace::WorkspaceError,
+    visual_workspace::blocks::{BlockInstance, BlockInputs, BlockOutputs},
+    visual_workspace::state::{WorkspaceState, Connection},
 };
+
+// Type alias for task handles with consistent error type
+type BlockTask = tokio::task::JoinHandle<std::result::Result<BlockOutputs, WorkspaceError>>;
 
 /// Represents a node in the execution graph
 struct ExecutionNode {
@@ -22,7 +29,7 @@ struct ExecutionNode {
 pub struct OptimizationPipeline {
     nodes: HashMap<BlockId, ExecutionNode>,
     ready_queue: VecDeque<BlockId>,
-    in_progress: HashMap<BlockId, tokio::task::JoinHandle<Result<BlockOutputs>>>,
+    in_progress: HashMap<BlockId, BlockTask>,
     completed: HashMap<BlockId, BlockOutputs>,
 }
 
@@ -235,6 +242,13 @@ impl OptimizationPipeline {
         // Spawn a new task to execute the block
         let handle = tokio::spawn(async move {
             block.process(inputs).await
+                .map_err(|e| {
+                    // Convert any error to WorkspaceError
+                    match e.downcast::<WorkspaceError>() {
+                        Ok(ws_err) => *ws_err,
+                        Err(e) => WorkspaceError::BlockError(format!("Block execution failed: {}", e))
+                    }
+                })
         });
         
         self.in_progress.insert(block_id, handle);
@@ -249,10 +263,11 @@ impl OptimizationPipeline {
                 .ok_or_else(|| WorkspaceError::PipelineError("No tasks in progress".to_string()))?;
             
             let block_id = *block_id;
-            let result = handle.await
-                .map_err(|e| WorkspaceError::PipelineError(format!("Task panicked: {}", e)))?;
-                
-            (block_id, result)
+            match handle.await {
+                Ok(Ok(outputs)) => (block_id, Ok(outputs)),
+                Ok(Err(e)) => (block_id, Err(e)),
+                Err(e) => return Err(WorkspaceError::PipelineError(format!("Task panicked: {}", e))),
+            }
         };
         
         // Remove the completed task

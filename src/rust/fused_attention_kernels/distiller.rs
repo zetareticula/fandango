@@ -1,5 +1,5 @@
-use candle_core::{Tensor, DType, Device, Result as CandleResult, Shape};
-use candle_nn::{Optimizer, SGD, VarBuilder, VarMap, Var, VarInit};
+use candle_core::{Tensor, DType, Device, Result as CandleResult, Shape, Var};
+use candle_nn::{Optimizer, SGD, VarBuilder, VarMap, Init as VarInit};
 use std::time::Instant;
 use thiserror::Error;
 use std::collections::HashMap;

@@ -1,13 +1,6 @@
 use rand::Rng;
 use std::collections::HashMap;
-use std::vec::Vec;
-use std::hash::Hash;
-use std::collections::HashSet;
-use std::iter::FromIterator;
-use bloomfilter::Bloom;
-use fxhash;
-use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 
@@ -71,6 +64,11 @@ impl CognitiveModel {
             }
         }
         likelihood
+    }
+
+    /// Get a reference to the theory space
+    pub fn theory_space(&self) -> &HashMap<String, f64> {
+        &self.theory_space
     }
 }
 

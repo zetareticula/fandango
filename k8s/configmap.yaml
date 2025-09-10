@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fandango-config
+  labels:
+    app: fandango
+data:
+  RUST_LOG: "info"
+  PORT: "8080"
+  MAX_WORKERS: "8"
+  QUANTIZATION_CACHE_SIZE: "1000"
+  MODEL_STORAGE_PATH: "/data/models"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fandango-secrets
+  labels:
+    app: fandango
+type: Opaque
+data:
+  # Base64 encoded values - replace with actual secrets
+  api_key: ""
+  database_url: ""
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fandango-model-storage
+  labels:
+    app: fandango
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd

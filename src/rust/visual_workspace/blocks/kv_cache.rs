@@ -10,6 +10,15 @@
 
 use serde::{Serialize, Deserialize};
 use super::*;
+use crate::storage_engine::KVCacheManager;
+
+/// KV Cache optimizer block
+/// Optimizes the KV cache for attention layers
+/// Uses a KVCacheManager to manage the cache   
+
+pub struct KVCacheOptimizerState {
+    kv_cache_manager: KVCacheManager,
+}   
 
 /// A block that optimizes the KV cache for attention layers
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

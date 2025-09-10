@@ -34,18 +34,6 @@ pub trait DebuggableBlock: OptimizationBlock + Debuggable {}
 
 // Implement Debuggable for all blocks that implement both OptimizationBlock and Debuggable
 impl<T> DebuggableBlock for T where T: OptimizationBlock + Debuggable {}
-use crate::fused_attention_kernels::fused_attention::FusedAttention;
-use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, NeuralPredictor};
-use crate::fused_attention_kernels::distiller::Distiller;
-use crate::fused_attention_kernels::memory_layout::FFNMemoryLayout;
-use crate::fused_attention_kernels::memory_management::MemoryManager;
-use crate::fused_attention_kernels::speculative_decoding::SpeculativeDecoder;
-use crate::fused_attention_kernels::wasm::WasmFusedAttention;
-use crate::kvcache_manager::KVCacheManager;
-use crate::runtime_scheduler::RuntimeScheduler;
-use crate::utils::Timer;
-use crate::storage_engine::SelfDesigningEngine;
-use crate::cognitive_modeling::MCMCSearch;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -110,11 +98,26 @@ impl BlockOutputs {
 /// A block instance in the workspace
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockInstance {
+    /// Unique identifier for this block instance
     pub id: BlockId,
+    
+    /// Type identifier for the block
     pub block_type: String,
+    
+    /// Position in the workspace
     pub position: Position,
+    
+    /// Size of the block in the workspace
     pub size: Size,
+    
+    /// Z-index for layering in the workspace
+    pub z_index: u32,
+    
+    /// Additional data specific to the block type
+    #[serde(default)]
     pub data: serde_json::Value,
+    
+    /// The actual block implementation (not serialized)
     #[serde(skip)]
     block: Option<Box<dyn OptimizationBlock>>,
 }
@@ -126,6 +129,7 @@ impl Clone for BlockInstance {
             block_type: self.block_type.clone(),
             position: self.position.clone(),
             size: self.size.clone(),
+            z_index: self.z_index,
             data: self.data.clone(),
             block: self.block.as_ref().map(|b| b.clone_box()),
         }
@@ -133,14 +137,15 @@ impl Clone for BlockInstance {
 }
 
 impl BlockInstance {
-    /// Create a new block instance
+    /// Create a new block instance with a unique ID
     pub fn new(block: Box<dyn OptimizationBlock>) -> Self {
         Self {
-            id: BlockId::default(),
+            id: BlockId::new(),
             block_type: block.block_type().to_string(),
             position: Position::default(),
-            size: Size { width: 200.0, height: 100.0 },
-            data: serde_json::Value::Null,
+            size: Size::default(),
+            z_index: 0,  // Will be updated by WorkspaceState when added
+            data: serde_json::json!({}),
             block: Some(block),
         }
     }
@@ -172,6 +177,15 @@ impl BlockInstance {
         self.block.as_mut().ok_or_else(|| 
             WorkspaceError::BlockError("Block not initialized".to_string())
         )
+    }
+    
+    /// Process inputs and return outputs asynchronously
+    pub async fn process(&self, inputs: BlockInputs) -> Result<BlockOutputs> {
+        self.block
+            .as_ref()
+            .ok_or_else(|| WorkspaceError::BlockError("Block not initialized".to_string()))?
+            .process(inputs)
+            .await
     }
 }
 

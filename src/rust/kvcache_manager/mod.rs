@@ -15,10 +15,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
-use candle_core::Device;
-use hashbrown::HashMap;
+use candle_core::{Device, Tensor};
+use hashbrown::{HashMap, hash_map::Entry};
 use log;
 use thiserror::Error;
+use crate::storage_engine::StorageEngineError;
 
 use crate::storage_engine::learned_structures::LearnedStructure;
 
@@ -412,7 +413,7 @@ impl Drop for KVCacheManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use candle_core::Device;
+    use candle_core::{Device, Tensor};
     
     #[test]
     fn test_cache_basic_operations() {

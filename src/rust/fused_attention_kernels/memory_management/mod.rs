@@ -2,7 +2,7 @@
 
 use candle_core::{Tensor, Device, DType, Error as CandleError};
 use candle_core::error::Result as CandleResult;
-use crate::fused_attention_kernels::distiller::monitoring;
+use crate::fused_attention_kernels::distiller;
 
 /// Convert a string error into a CandleError
 fn err_msg<S: Into<String>>(msg: S) -> CandleError {
@@ -40,7 +40,7 @@ impl MemoryManager {
         let start = std::time::Instant::now();
         let output = dram_params.clone(); // Simulate usage
         let latency = start.elapsed().as_secs_f64() * 1000.0; // ms
-        monitoring::record_latency(latency);
+        distiller::monitoring::record_latency(latency);
         Ok(output)
     }
 }

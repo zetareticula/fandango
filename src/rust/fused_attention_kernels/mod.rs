@@ -14,17 +14,18 @@ pub mod speculative_decoding;
 pub mod wasm;
 
 // Re-export the main types for easier access
-pub use crate::fused_attention_kernels::fused_attention::FusedAttention;
-pub use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, NeuralPredictor};
-pub use crate::fused_attention_kernels::distiller::Distiller;
-pub use crate::fused_attention_kernels::memory_layout::FFNMemoryLayout;
-pub use crate::fused_attention_kernels::memory_management::MemoryManager;
-pub use crate::fused_attention_kernels::speculative_decoding::SpeculativeDecoder;
+// Note: Commenting out unused exports to reduce warnings
+// pub use crate::fused_attention_kernels::fused_attention::FusedAttention;
+// pub use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, NeuralPredictor};
+// pub use crate::fused_attention_kernels::distiller::Distiller;
+// pub use crate::fused_attention_kernels::memory_layout::FFNMemoryLayout;
+// pub use crate::fused_attention_kernels::memory_management::MemoryManager;
+// pub use crate::fused_attention_kernels::speculative_decoding::SpeculativeDecoder;
 
 // Re-export error types
-pub use sparsity_manager::SparsityError;
-pub use memory_layout::MemoryLayoutError;
-pub use distiller::DistillerError;
+// pub use sparsity_manager::SparsityError;
+// pub use memory_layout::MemoryLayoutError;
+// pub use distiller::DistillerError;
 
 use thiserror::Error;
 

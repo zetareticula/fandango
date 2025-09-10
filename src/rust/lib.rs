@@ -16,11 +16,19 @@
 
 use candle_core::{Result, DType, Device, Tensor, Error};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
 
 // Re-export commonly used types
 pub use candle_core;
 pub use candle_nn;
+
+// Core modules
+pub mod fused_attention_kernels;
+pub mod kvcache_manager;
+pub mod runtime_scheduler;
+pub mod storage_engine;
+pub mod cognitive_modeling;
+pub mod visual_workspace;
+pub mod utils;
 
 #[derive(Error, Debug)]
 pub enum FandangoError {
@@ -34,22 +42,20 @@ pub enum FandangoError {
     CandleError(#[from] candle_core::Error),
 }
 
-// Core modules
-pub mod fused_attention_kernels;
-pub mod kvcache_manager;
-pub mod runtime_scheduler;
-pub mod utils;
-pub mod storage_engine;
-pub mod cognitive_modeling;
-pub mod visual_workspace;
-
 // Re-export important types
 pub use storage_engine::{SelfDesigningEngine, LearnedStructure, DesignSpace, CosineIntegration};
 pub use cognitive_modeling::{CognitiveModel, MCMCSearch};
-pub use fused_attention_kernels::{
-    FusedAttention, SparsityManager, NeuralPredictor, Distiller, FFNMemoryLayout, SpeculativeDecoder,
-    SparsityError, MemoryLayoutError, DistillerError, AttentionError
-};
+
+// Re-export fused_attention_kernels types with full paths
+pub use crate::fused_attention_kernels::fused_attention::FusedAttention;
+pub use crate::fused_attention_kernels::sparsity_manager::{SparsityManager, NeuralPredictor};
+pub use crate::fused_attention_kernels::distiller::Distiller;
+pub use crate::fused_attention_kernels::memory_layout::FFNMemoryLayout;
+pub use crate::fused_attention_kernels::speculative_decoding::SpeculativeDecoder;
+pub use crate::fused_attention_kernels::sparsity_manager::SparsityError;
+pub use crate::fused_attention_kernels::memory_layout::MemoryLayoutError;
+pub use crate::fused_attention_kernels::distiller::DistillerError;
+pub use crate::fused_attention_kernels::fused_attention::AttentionError;
 
 #[cfg(feature = "quantized_model_loader")]
 pub mod quantized_model_loader;

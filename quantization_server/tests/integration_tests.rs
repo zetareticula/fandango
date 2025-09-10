@@ -1,19 +1,32 @@
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+
 use std::sync::Once;
 use std::time::Duration;
 use reqwest::blocking::Client;
 use serde_json::json;
 use serial_test::serial;
 
+// Initialize the test server only once
 static INIT: Once = Once::new();
-
+// Setup the test server
 fn setup() {
+    // Initialize the test server only once
     INIT.call_once(|| {
         // Start the test server in the background
         std::thread::spawn(|| {
-            let _ = std::process::Command::new("cargo")
+            // if the args contain --bin, run the test server
+            let args: Vec<String> = std::env::args().collect();
+            // contains the binary name
+            if args.contains(&"--bin".to_string()) {
+                
+            //cargo run --bin quantization_server
+            let _ = std::process::Command::new("cargo") 
                 .args(["run", "--bin", "quantization_server"])
                 .env("RUST_LOG", "debug")
                 .status();
+
+            }
         });
         
         // Give the server time to start

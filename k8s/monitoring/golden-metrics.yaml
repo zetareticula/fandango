@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "fandango_rules.yml"
+
+    scrape_configs:
+      - job_name: 'fandango-quantization-server'
+        static_configs:
+          - targets: ['fandango-quantization-service:80']
+        metrics_path: /metrics
+        scrape_interval: 5s
+
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+
+  fandango_rules.yml: |
+    groups:
+    - name: fandango.golden_metrics
+      rules:
+      # Latency (99th percentile response time)
+      - alert: FandangoHighLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="fandango-quantization-server"}[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          service: fandango
+        annotations:
+          summary: "Fandango high latency detected"
+          description: "99th percentile latency is {{ $value }}s for {{ $labels.instance }}"
+
+      # Error Rate (percentage of 5xx responses)
+      - alert: FandangoHighErrorRate
+        expr: (rate(http_requests_total{job="fandango-quantization-server",status=~"5.."}[5m]) / rate(http_requests_total{job="fandango-quantization-server"}[5m])) * 100 > 5
+        for: 1m
+        labels:
+          severity: critical
+          service: fandango
+        annotations:
+          summary: "Fandango high error rate detected"
+          description: "Error rate is {{ $value }}% for {{ $labels.instance }}"
+
+      # Throughput (requests per second)
+      - alert: FandangoLowThroughput
+        expr: rate(http_requests_total{job="fandango-quantization-server"}[5m]) < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: fandango
+        annotations:
+          summary: "Fandango low throughput detected"
+          description: "Throughput is {{ $value }} req/s for {{ $labels.instance }}"
+
+      # Quantization-specific metrics
+      - alert: FandangoQuantizationFailures
+        expr: rate(quantization_failures_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: warning
+          service: fandango
+        annotations:
+          summary: "Fandango quantization failures detected"
+          description: "Quantization failure rate is {{ $value }}/s for {{ $labels.instance }}"
+
+      - alert: FandangoMemoryUsage
+        expr: (container_memory_usage_bytes{pod=~"fandango-.*"} / container_spec_memory_limit_bytes{pod=~"fandango-.*"}) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+          service: fandango
+        annotations:
+          summary: "Fandango high memory usage"
+          description: "Memory usage is {{ $value }}% for {{ $labels.pod }}"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-fandango
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  fandango-golden-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Fandango Golden Metrics",
+        "tags": ["fandango", "golden-metrics"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Request Latency (99th percentile)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"fandango-quantization-server\"}[5m]))",
+                "legendFormat": "99th percentile"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 0.2},
+                    {"color": "red", "value": 0.5}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Error Rate",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "(rate(http_requests_total{job=\"fandango-quantization-server\",status=~\"5..\"}[5m]) / rate(http_requests_total{job=\"fandango-quantization-server\"}[5m])) * 100",
+                "legendFormat": "Error Rate %"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percent",
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 1},
+                    {"color": "red", "value": 5}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Throughput (req/s)",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{job=\"fandango-quantization-server\"}[5m])",
+                "legendFormat": "Requests/sec"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "reqps",
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": null},
+                    {"color": "yellow", "value": 10},
+                    {"color": "green", "value": 50}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+          },
+          {
+            "id": 4,
+            "title": "Quantization Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(quantization_requests_total[5m])",
+                "legendFormat": "Quantization Requests/sec"
+              },
+              {
+                "expr": "rate(quantization_failures_total[5m])",
+                "legendFormat": "Quantization Failures/sec"
+              },
+              {
+                "expr": "histogram_quantile(0.95, rate(quantization_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile duration"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          }
+        ],
+        "time": {"from": "now-1h", "to": "now"},
+        "refresh": "5s"
+      }
+    }

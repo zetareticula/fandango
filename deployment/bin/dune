@@ -1,0 +1,5 @@
+(executable
+ (public_name fandango-deploy)
+ (name main)
+ (libraries fandango-deploy cmdliner lwt lwt.unix)
+ (preprocess (pps lwt_ppx)))

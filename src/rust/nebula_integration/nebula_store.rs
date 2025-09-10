@@ -62,3 +62,4 @@ impl NebulaStore {
         Ok(Tensor::zeros((1024, 1024), DType::F32, &self.device)?)
     }
 }
+

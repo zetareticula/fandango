@@ -1,59 +1,250 @@
-name: CI/CD Pipeline
+name: Fandango CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, develop]
+    tags: ['v*']
   pull_request:
-    branches:
-      - main
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  build-and-test:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Generate version
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION=$(date +%Y.%m.%d)-${GITHUB_SHA::8}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+  lint-and-format:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        target: x86_64-unknown-linux-gnu
         components: rustfmt, clippy
-
+    
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
 
-    - name: Build
-      run: cargo build --release --features cuda
-
-    - name: Test
-      run: cargo test --release --features cuda
-
-    - name: Build Docker image
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [stable, beta]
+        features: ["", "metal", "cuda"]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust ${{ matrix.rust }}
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-${{ matrix.rust }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Run tests
       run: |
-        docker build -t fandango:latest --build-arg CUDA_VERSION=12.2.0 .
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-        docker push fandango:latest
-
-    - name: Test image in k8s
+        if [ "${{ matrix.features }}" != "" ]; then
+          cargo test --features ${{ matrix.features }} --verbose
+        else
+          cargo test --verbose
+        fi
+    
+    - name: Test quantization server
       run: |
-        minikube start --driver=docker --nodes 1 --addons=ingress --kubernetes-version=v1.28.0
+        cd quantization_server
+        cargo test --release --verbose
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Run benchmarks
+      run: |
+        cd quantization_server
+        cargo bench --verbose
+
+  build:
+    needs: [version, lint-and-format, test]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build release
+      run: |
+        cargo build --release
+        cd quantization_server && cargo build --release
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: fandango-binaries-${{ needs.version.outputs.version }}
+        path: |
+          target/release/fandango
+          quantization_server/target/release/fandango-quantization-server
+
+  docker:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: |
+          fandango/quantization-server:latest
+          fandango/quantization-server:${{ needs.version.outputs.version }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: [version, docker]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Deploy to staging
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        
+        # Update image tag in deployment
+        sed -i "s|fandango:latest|fandango/quantization-server:${{ needs.version.outputs.version }}|g" k8s/deployment.yaml
+        
+        kubectl apply -f k8s/configmap.yaml
         kubectl apply -f k8s/deployment.yaml
-        sleep 60
-        kubectl get pods
-        kubectl logs -l app=fandango
-        kubectl delete -f k8s/deployment.yaml
-      env:
-        TRITON_URL: "localhost:8001"
+        
+        # Wait for rollout
+        kubectl rollout status deployment/fandango-quantization-server --timeout=300s
+        
+        # Health check
+        kubectl wait --for=condition=ready pod -l app=fandango --timeout=300s
 
-    - name: Cleanup
-      if: always()
-      run: minikube delete
+  deploy-production:
+    needs: [version, docker, deploy-staging]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.28.0'
+    
+    - name: Deploy to production
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        
+        # Update image tag in deployment
+        sed -i "s|fandango:latest|fandango/quantization-server:${{ needs.version.outputs.version }}|g" k8s/deployment.yaml
+        
+        kubectl apply -f k8s/configmap.yaml
+        kubectl apply -f k8s/deployment.yaml
+        
+        # Wait for rollout
+        kubectl rollout status deployment/fandango-quantization-server --timeout=600s
+        
+        # Health check
+        kubectl wait --for=condition=ready pod -l app=fandango --timeout=600s
+        
+        # Run smoke tests
+        kubectl run smoke-test --rm -i --restart=Never --image=curlimages/curl -- \
+          curl -f http://fandango-quantization-service/health
+
+  monitoring:
+    needs: [deploy-production]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+    - name: Setup monitoring
+      run: |
+        echo "Setting up golden metrics monitoring..."
+        # This would typically integrate with your monitoring system
+        # to track latency, error rate, and throughput

@@ -7,10 +7,18 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use serde::{Serialize, Deserialize};
-use super::{
-    BlockId, Position, Result, Size, WorkspaceError,
-    blocks::{BlockInstance, BlockLibrary, Debuggable, DebuggableBlock},
-    state::{WorkspaceState, Connection},
+
+// Import from the parent module to ensure type consistency
+use crate::visual_workspace::{
+    BlockId,
+    Position,
+    Result,
+    WorkspaceError,
+    blocks::{
+        BlockLibrary,
+        Debuggable,
+    },
+    state::WorkspaceState,
     pipeline::OptimizationPipeline,
 };
 
@@ -312,21 +320,27 @@ impl VisualWorkspace {
                         }
                     }
                     should_continue
-                    true
                 }
             });
+            
+            // Clone variables that need to be moved into the closures
+            let debug_info_clone = debug_info.clone();
+            let metrics_clone = metrics.clone();
+            let progress_clone = progress.clone();
+            let progress_clone2 = progress.clone(); // Clone for the second closure
+            let control_tx_clone = control_tx.clone();
             
             // Run the pipeline with callbacks
             let result = pipeline.execute_with_callbacks(
                 // Progress callback
-                |block_id, block| {
+                move |block_id, block| {
                     // Update debug info
                     if let Some(debuggable) = block.as_any().downcast_ref::<Box<dyn Debuggable>>() {
-                        if let Ok(mut debug_info_lock) = debug_info.lock() {
+                        if let Ok(mut debug_info_lock) = debug_info_clone.lock() {
                             debug_info_lock.insert(block_id, debuggable.debug_info());
                             
                             if let Some(block_metrics) = debuggable.metrics() {
-                                if let Ok(mut metrics_lock) = metrics.lock() {
+                                if let Ok(mut metrics_lock) = metrics_clone.lock() {
                                     metrics_lock.insert(block_id, block_metrics);
                                 }
                             }
@@ -334,17 +348,17 @@ impl VisualWorkspace {
                     }
                     
                     // Update progress (using a simple counter for now)
-                    if let Ok(mut progress_lock) = progress.lock() {
-                        *progress_lock = block_id.0.as_u128() as f32 / 100.0; // Simple progress estimation
+                    if let Ok(mut progress_lock) = progress_clone.lock() {
+                        *progress_lock = block_id.as_uuid().as_u128() as f32 / 100.0; // Simple progress estimation
                     }
                     
                     // Check for pause/stop
-                    let _ = control_tx.try_send(());
+                    let _ = control_tx_clone.try_send(());
                 },
                 // Completion callback
-                |block_id, block, result| {
+                move |block_id, _block, _result| {
                     // Handle block completion if needed
-                    if let Ok(mut progress_lock) = progress.lock() {
+                    if let Ok(mut progress_lock) = progress_clone2.lock() {
                         *progress_lock = block_id.0.as_u128() as f32 / 100.0;
                     }
                 },

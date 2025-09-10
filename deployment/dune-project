@@ -1,0 +1,9 @@
+(lang dune 3.0)
+
+(name fandango-deploy)
+
+(package
+ (name fandango-deploy)
+ (depends ocaml dune lwt lwt_ppx yojson cmdliner logs fmt)
+ (synopsis "OCaml-based deployment orchestration for Fandango")
+ (description "A composable deployment system for Fandango using OCaml and Dune"))

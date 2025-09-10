@@ -1,13 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the Zeta Reticula - Fandango  project, which is licensed under the Apache License 2.0.
+
+
 use actix_web::{web, App, HttpServer, Responder, HttpResponse, post, get};
 use actix_web::middleware::Logger;
 use candle_core::{DType, Device, Tensor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use log::{info, error};
 use simple_logger::SimpleLogger;
 use anyhow::Result;
-use std::env;
 
 // App state to hold loaded models
 struct AppState {
@@ -25,11 +28,14 @@ struct QuantizedModel {
 impl QuantizedModel {
     fn quantize(weights: &Tensor, bits: usize) -> Result<Self> {
         let device = weights.device();
-        let (min_vals, max_vals) = (weights.min()?, weights.max()?);
-        let scale = (max_vals.to_scalar::<f32>()? - min_vals.to_scalar::<f32>()?) / ((1 << bits) as f32 - 1.0);
-        let zero_point = min_vals.to_scalar::<f32>()? / scale;
+        let min_val = weights.flatten_all()?.min(0)?;
+        let max_val = weights.flatten_all()?.max(0)?;
+        let scale = (max_val.to_scalar::<f32>()? - min_val.to_scalar::<f32>()?) / ((1 << bits) as f32 - 1.0);
+        let zero_point = -min_val.to_scalar::<f32>()? / scale;
         
-        let quantized = ((weights / scale)? + zero_point)?.to_dtype(DType::U8)?;
+        let scale_tensor = Tensor::new(&[scale], weights.device())?;
+        let zero_point_tensor = Tensor::new(&[zero_point], weights.device())?;
+        let quantized = weights.broadcast_div(&scale_tensor)?.broadcast_add(&zero_point_tensor)?.to_dtype(DType::U8)?;
         
         Ok(Self {
             weights: quantized,
@@ -40,13 +46,15 @@ impl QuantizedModel {
     }
     
     fn dequantize(&self) -> Result<Tensor> {
-        let dequantized = (self.weights.to_dtype(DType::F32)? * self.scale)? - self.zero_point;
+        let scale_tensor = Tensor::new(&[self.scale], self.weights.device())?;
+        let zero_point_tensor = Tensor::new(&[self.zero_point], self.weights.device())?;
+        let dequantized = self.weights.to_dtype(DType::F32)?.broadcast_mul(&scale_tensor)?.broadcast_sub(&zero_point_tensor)?;
         Ok(dequantized)
     }
     
     fn quantized_matmul(&self, x: &Tensor) -> Result<Tensor> {
         let dequantized = self.dequantize()?;
-        x.matmul(&dequantized)
+        Ok(x.matmul(&dequantized)?)
     }
 }
 
@@ -104,7 +112,7 @@ async fn quantize_model(
     // In a real implementation, load the actual model weights here
     // For demo, create a random tensor of specified dimensions
     let device = Device::Cpu;
-    let weights = match Tensor::randn(0f32, 1.0, dims, &device) {
+    let weights = match Tensor::randn(0f32, 1.0, dims.as_slice(), &device) {
         Ok(t) => t,
         Err(e) => {
             error!("Failed to create tensor: {}", e);
@@ -118,8 +126,8 @@ async fn quantize_model(
     
     match QuantizedModel::quantize(&weights, bits) {
         Ok(quantized) => {
-            let original_size = weights.nbytes();
-            let quantized_size = quantized.weights.nbytes();
+            let original_size = weights.elem_count() * std::mem::size_of::<f32>();
+            let quantized_size = quantized.weights.elem_count() * std::mem::size_of::<u8>();
             let compression_ratio = original_size as f32 / quantized_size as f32;
             
             // Store the model

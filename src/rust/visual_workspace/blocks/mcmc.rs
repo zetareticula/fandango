@@ -7,9 +7,9 @@
 
 //! MCMC (Markov Chain Monte Carlo) optimization block implementation
 
-use serde::{Serialize, Deserialize};
+// Cleaned up unused imports
 use super::*;
-use crate::cognitive_modeling::{MCMCSearch, CognitiveModel};
+use crate::cognitive_modeling::MCMCSearch;
 use std::sync::{Arc, Mutex};
 
 /// A block that performs MCMC-based optimization
@@ -115,17 +115,15 @@ impl OptimizationBlock for MCMCBlock {
         let metrics = Arc::clone(&self.metrics);
         
         Box::pin(async move {
-            // Get input parameters
-            let initial_params = inputs.values.get("initial_parameters")
+            // Get input parameters (currently unused, but keeping the error handling)
+            let _initial_params = inputs.values.get("initial_parameters")
                 .ok_or_else(|| WorkspaceError::BlockError("Missing 'initial_parameters' input".to_string()))?;
                 
-            let objective = inputs.values.get("objective_function")
+            let _objective = inputs.values.get("objective_function")
                 .ok_or_else(|| WorkspaceError::BlockError("Missing 'objective_function' input".to_string()))?;
             
-            // Initialize MCMC
-            let mut model = CognitiveModel::new();
-            // TODO: Initialize model with parameters from initial_params
-            
+            // Initialize MCMC with default model
+            let model = crate::cognitive_modeling::CognitiveModel::new();
             let mut mcmc = MCMCSearch::new(model);
             
             // Reset state
@@ -141,11 +139,18 @@ impl OptimizationBlock for MCMCBlock {
             mcmc.search(iterations);
             
             // Get the best solution from the model
-            let model = mcmc.model.lock().unwrap();
-            if let Some((best_theory, score)) = model.theory_space.iter()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)) {
-                
-                best_score = *score;
+            let (best_theory, score) = {
+                let model = mcmc.model.lock().unwrap();
+                if let Some((best_theory, score)) = model.theory_space().iter()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)) {
+                    (Some(best_theory.clone()), *score)
+                } else {
+                    (None, 0.0)
+                }
+            };
+            
+            if let (Some(best_theory), score) = (best_theory, score) {
+                best_score = score;
                 best_sol = Some(serde_json::json!({ "theory": best_theory, "score": score }));
                 *best_solution.lock().unwrap() = best_sol.clone();
                 

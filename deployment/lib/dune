@@ -1,0 +1,5 @@
+(library
+ (public_name fandango-deploy)
+ (name fandango_deploy)
+ (libraries lwt lwt.syntax yojson cmdliner logs fmt unix)
+ (preprocess (pps lwt_ppx)))
